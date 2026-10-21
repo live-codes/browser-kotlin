@@ -6,7 +6,7 @@ with no server and no build step:
 | Demo | Compiler | First load | Language |
 | --- | --- | ---: | --- |
 | [`index.html`](index.html) | [minikotlin](https://minikotlin.run) 0.1.0 — from-scratch C→Wasm compiler | ~2 MB | a tested Kotlin subset |
-| [`real.html`](real.html) | **real Kotlin 2.5.0-dev-9169 (K2)** via GraalVM Web Image | ~87 MB | real Kotlin + stdlib |
+| [`real.html`](real.html) | **real Kotlin 2.5.0-dev-9169 (K2)** via GraalVM Web Image | ~30 MB gz (~87 MB inflated) | real Kotlin + stdlib |
 
 Both emit **WasmGC**, instantiate it on the page, and stream `println` output.
 Nothing is sent anywhere.
@@ -23,6 +23,10 @@ node serve.mjs          # http://localhost:8001/
 Press **Run** (or Ctrl/Cmd+Enter). A static server is required because browsers
 block ES-module Workers and WebAssembly over `file://`; `serve.mjs` mainly adds
 `Content-Type: application/wasm`. Nothing is compiled server-side.
+
+The real compiler's image and stdlib are shipped gzipped (25.8 MB + 3.8 MB). A
+small worker wrapper inflates them with `DecompressionStream` before the
+GraalVM loader uses them, so the browser transfers ~30 MB instead of ~87 MB.
 
 ```sh
 npm test                # Node smoke test for the minikotlin demo
@@ -87,8 +91,10 @@ wasm; no JVM is installed. The prebuilt image used here was published by
 [`space-enthusiast/kotlin-on-web-playground`](https://github.com/space-enthusiast/kotlin-on-web-playground).
 
 `real.html` starts the classic worker `vendor/kotlin-web/kotlin-compiler-worker.js`.
-The worker loads its own `.wasm` and the 12 MB stdlib archive next to itself,
-then answers messages:
+That file is a small wrapper: it patches `fetch`, then imports the generated
+GraalVM worker (`kotlin-compiler-image.js`). The compiler image and stdlib are
+requested as `.gz`, piped through `DecompressionStream`, and only then handed to
+the GraalVM loader. The generated worker then answers messages:
 
 ```js
 worker.postMessage({ id, operation: 'compile', text: source, argument: '' });
@@ -113,9 +119,10 @@ and checksums.
 There are now two very different possible products:
 
 1. **Real K2** is the credible Kotlin language path: actual Kotlin and stdlib,
-   proper diagnostics, ~87 MB first load. Compile is ~1–2 s, which is usable for
-   a Run button but not for per-keystroke analysis. The Analysis API can be
-   added for completion/lint at the cost of another ~75 MB.
+   proper diagnostics, ~30 MB compressed first load (~87 MB inflated). Compile is
+   ~1–2 s, which is usable for a Run button but not for per-keystroke analysis.
+   The Analysis API can be added for completion/lint at the cost of another
+   ~75 MB (compressible to roughly 25 MB).
 2. **minikotlin** is a ~2 MB fallback: instant load, tens-of-ms compiles, but a
    subset language and an unconfirmed licence.
 
@@ -128,9 +135,10 @@ Open items:
 - **The real compiler is single-file, stdlib-only.** No other libraries, no
   stdin, no multi-file projects, no Gradle. The upstream Analysis API is not
   included here.
-- **Payload.** 87 MB for the real compiler (74.8 MB image + 12 MB stdlib),
-  cached by the browser. LiveCodes should lazy-load it only when a snippet uses
-  Kotlin.
+- **Payload.** ~30 MB compressed (25.8 MB compiler image + 3.8 MB stdlib;
+  ~87 MB after inflation), cached by the browser. The image and stdlib are
+  inflated in the worker with `DecompressionStream`; no server-side decompression
+  is involved. LiveCodes should lazy-load it only when a snippet uses Kotlin.
 - **WasmGC is required** — Chrome/Edge 119+, Firefox 120+, Safari 18.2+. No
   feature detection yet; unsupported browsers fail at instantiation.
 - **Timeouts.** A program is stopped after 15 s in both demos.
@@ -142,7 +150,7 @@ Open items:
 
 | Route | Verdict |
 | --- | --- |
-| Real K2 via GraalVM Web Image (this demo) | Genuine Kotlin, works; 87 MB payload, licensing to clear |
+| Real K2 via GraalVM Web Image (this demo) | Genuine Kotlin, works; ~30 MB gz payload (~87 MB inflated), licensing to clear |
 | minikotlin (this demo) | Works, tiny; subset language |
 | TeaVM + Kotlin class files | Back end proven (8/8 in `../browser-jvm/FINDINGS.md`), but no browser class-file front end exists |
 | Doppio JVM in JS | Compiles took 7–20 minutes; abandoned by `@live-codes/java-wasm` |
