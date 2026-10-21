@@ -14,18 +14,29 @@ export function offsetToLineCol(source, offset) {
   return { line, column: end - lineStart + 1 };
 }
 
-export function formatDiagnostics(diagnostics, source, fileName = 'Main.kt') {
+export function formatDiagnostics(
+  diagnostics,
+  source,
+  fileName = 'Main.kt',
+  mapOffset = (offset) => offset
+) {
   const lines = [];
   for (const diagnostic of diagnostics || []) {
-    const { line, column } = offsetToLineCol(source, diagnostic.from);
+    const offset = mapOffset(Number(diagnostic.from) || 0);
+    const { line, column } = offsetToLineCol(source, offset);
     const severity = String(diagnostic.severity || 'ERROR').toLowerCase();
     lines.push(`${fileName}:${line}:${column}: ${severity}: ${diagnostic.message}`);
   }
   return lines;
 }
 
-export function compileFailureResult(answer, source, fileName) {
-  const errors = formatDiagnostics(answer.diagnostics, source, fileName);
+export function compileFailureResult(
+  answer,
+  source,
+  fileName,
+  mapOffset = (offset) => offset
+) {
+  const errors = formatDiagnostics(answer.diagnostics, source, fileName, mapOffset);
   return {
     stdout: '',
     stderr: '',

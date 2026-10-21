@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { JS_STDIN_HOOK } from '../prelude.js';
 
 // A Node worker thread running the real Kotlin compiler image. The image is
 // generated for the browser, but its Node path reads a local .wasm file, so we
@@ -107,6 +108,11 @@ parentPort.on('message', async (message) => {
     const send = (text, stream, newline) =>
       post({ type: 'output', id: message.id, text, stream, newline });
 
+    const inputLines = Array.isArray(message.inputLines) ? message.inputLines : [];
+    let inputIndex = 0;
+    globalThis[JS_STDIN_HOOK] = () =>
+      inputIndex < inputLines.length ? inputLines[inputIndex++] : null;
+
     globalThis.write = (text) => send(String(text), 'stdout', false);
     const original = {};
     for (const level of ['log', 'info', 'debug']) {
@@ -127,6 +133,7 @@ parentPort.on('message', async (message) => {
     } finally {
       for (const level of Object.keys(original)) console[level] = original[level];
       delete globalThis.write;
+      delete globalThis[JS_STDIN_HOOK];
       await rm(runDir, { recursive: true, force: true }).catch(() => {});
     }
 

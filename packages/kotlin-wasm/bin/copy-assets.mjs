@@ -56,4 +56,4 @@ await writeFile(
 
 console.log(`Runtime assets copied to ${target}`);
 console.log('Serve that directory and pass its URL as baseUrl, for example:');
-console.log("  await createCompiler('kotlin', { baseUrl: new URL('/kotlin/', location.href) });");
+console.log("  await createCompiler({ baseUrl: new URL('/kotlin/', location.href) });");

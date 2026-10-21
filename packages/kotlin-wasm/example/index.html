@@ -23,7 +23,7 @@
       new URLSearchParams(location.search).get('base') ||
       new URL('../assets/', location.href).href;
     try {
-      const compiler = await createCompiler('kotlin', { baseUrl: base });
+      const compiler = await createCompiler({ baseUrl: base });
       const result = await compiler.run(`
 data class Point(val x: Int, val y: Int)
 
@@ -32,8 +32,9 @@ fun main() {
     val p = Point(2, 3)
     println("p = $p, sum = \${p.x + p.y}")
     print("print "); print("stays "); println("on one line")
+    println("stdin: " + readlnOrNull())
 }
-`);
+`, 'hello from stdin');
       out.textContent = JSON.stringify(result, null, 2);
       compiler.dispose();
     } catch (error) {

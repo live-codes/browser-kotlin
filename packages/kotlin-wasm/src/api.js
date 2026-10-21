@@ -1,18 +1,36 @@
-import { COMPILER_VERSION, LANGUAGE_IDS, resolveLanguage } from './language.js';
-import { KotlinStdinUnsupportedError } from './errors.js';
+import { COMPILER_VERSION, DEFAULT_FILE_NAME, LANGUAGE_IDS } from './language.js';
+
+function normalizeInput(input) {
+  if (input == null) return '';
+  if (typeof input === 'string') return input;
+  if (input instanceof Uint8Array) return new TextDecoder().decode(input);
+  if (input instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(input));
+  if (ArrayBuffer.isView(input)) {
+    return new TextDecoder().decode(
+      new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+    );
+  }
+  throw new Error('run() input must be a string, Uint8Array or ArrayBuffer.');
+}
 
 // One implementation, two entries: `index.js` starts the compiler worker in a
 // browser, `index.node.js` starts it in a Node worker thread.
 export function createApi({ createEngine }) {
-  async function createCompiler(language = 'kotlin', options = {}) {
-    const resolved = resolveLanguage(language);
+  async function createCompiler(options = {}) {
+    if (typeof options === 'string') {
+      throw new Error(
+        'createCompiler takes an options object; Kotlin is the only language. ' +
+          'Call createCompiler({ baseUrl }).'
+      );
+    }
+
     const engine = await createEngine(options);
-    const fileName = options.fileName || resolved.fileName;
+    const fileName = options.fileName || DEFAULT_FILE_NAME;
     let disposed = false;
 
     return {
-      /** The resolved language id, `kotlin`. */
-      language: resolved.id,
+      /** The only language this package runs. */
+      language: 'kotlin',
 
       /** The name diagnostics use for the single source file. */
       fileName,
@@ -22,9 +40,9 @@ export function createApi({ createEngine }) {
 
       /** What this engine can do, for a host that routes between engines. */
       capabilities: Object.freeze({
-        language: resolved.id,
+        language: 'kotlin',
         compiler: COMPILER_VERSION,
-        stdin: false,
+        stdin: true,
         wasmGc: true,
         analysis: false
       }),
@@ -33,7 +51,8 @@ export function createApi({ createEngine }) {
        * Compile and run one program.
        *
        * @param {string} code - Kotlin source.
-       * @param {string|Uint8Array} [input] - must be empty: Kotlin/Wasm has no stdin.
+       * @param {string|Uint8Array|ArrayBuffer} [input] - lines pre-supplied to
+       *   `readln()` / `readlnOrNull()` / `readLine()`. Not interactive.
        * @param {object} [runOptions]
        * @param {number} [runOptions.timeoutMs] - how long the program may run.
        * @param {string} [runOptions.fileName] - name used in diagnostics.
@@ -45,13 +64,10 @@ export function createApi({ createEngine }) {
         if (typeof code !== 'string') {
           throw new Error('run() needs the program source as its first argument.');
         }
-        const hasInput =
-          input != null &&
-          (typeof input === 'string' ? input.length > 0 : (input.byteLength ?? input.length ?? 0) > 0);
-        if (hasInput) throw new KotlinStdinUnsupportedError();
 
         return engine.run({
           code,
+          input: normalizeInput(input),
           fileName: runOptions.fileName || fileName,
           timeoutMs: runOptions.timeoutMs,
           compileTimeoutMs: runOptions.compileTimeoutMs

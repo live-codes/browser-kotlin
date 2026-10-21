@@ -12,14 +12,3 @@ export class KotlinUnsupportedError extends KotlinWasmError {
     this.name = 'KotlinUnsupportedError';
   }
 }
-
-/** This engine has no console input; the caller should route to a fallback. */
-export class KotlinStdinUnsupportedError extends KotlinWasmError {
-  constructor() {
-    super(
-      'Kotlin (Wasm) does not support stdin. Run this program without input, or use a ' +
-        'stdin-capable Kotlin engine.'
-    );
-    this.name = 'KotlinStdinUnsupportedError';
-  }
-}

@@ -5,17 +5,17 @@ importScripts('../dist/kotlin-wasm.global.js');
 
 let compilerPromise = null;
 const getCompiler = () => {
-  compilerPromise ??= self.kotlinWasm.createCompiler('kotlin', {
+  compilerPromise ??= self.kotlinWasm.createCompiler({
     baseUrl: new URL('../assets/', self.location.href).href
   });
   return compilerPromise;
 };
 
 addEventListener('message', async (event) => {
-  const { id, code } = event.data;
+  const { id, code, input } = event.data;
   try {
     const compiler = await getCompiler();
-    const result = await compiler.run(code);
+    const result = await compiler.run(code, input);
     postMessage({ id, result });
   } catch (error) {
     postMessage({ id, error: String(error?.stack || error) });

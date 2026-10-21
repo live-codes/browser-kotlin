@@ -40,7 +40,7 @@ a build step.
 ## npm package
 
 [`packages/kotlin-wasm`](packages/kotlin-wasm) is **`@live-codes/kotlin-wasm`**:
-the real K2 compiler behind a `createCompiler('kotlin', { baseUrl })` API, in the
+the real K2 compiler behind a `createCompiler({ baseUrl })` API, in the
 shape of [`@live-codes/clang-wasm`](https://github.com/live-codes/clang-wasm).
 It has ESM and Node entries, an IIFE build for classic workers, a
 `kotlin-wasm-copy-assets` CLI, asset receipts and tests. `real.html` uses the
@@ -146,8 +146,9 @@ Open items:
   embeds GraalVM runtime code (Oracle GraalVM terms). Both are vendored for
   evaluation only — clear the terms before shipping.
 - **The real compiler is single-file, stdlib-only.** No other libraries, no
-  stdin, no multi-file projects, no Gradle. The upstream Analysis API is not
-  included here.
+  multi-file projects, no Gradle. The npm package supports pre-supplied
+  line-based stdin (`readln`/`readlnOrNull`/`readLine`); the demo page does not
+  expose an input panel. The upstream Analysis API is not included.
 - **Payload.** ~30 MB compressed (13.0 MB + 12.8 MB compiler parts + 3.8 MB
   stdlib; ~87 MB after inflation), cached by the browser. The image and stdlib
   are inflated in the worker with `DecompressionStream`; no server-side

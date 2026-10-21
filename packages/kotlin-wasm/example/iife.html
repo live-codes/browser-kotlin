@@ -22,6 +22,7 @@
       if (data.type === 'ready') {
         worker.postMessage({
           id: 1,
+          input: 'hello from classic stdin',
           code: `
 data class Point(val x: Int, val y: Int)
 
@@ -30,6 +31,7 @@ fun main() {
     print("print "); print("stays "); println("on one line")
     val p = Point(2, 3)
     println("sum = \${p.x + p.y}")
+    println("stdin: " + readlnOrNull())
 }
 `
         });

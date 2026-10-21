@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { COMPILER_VERSION } from './language.js';
 import { KotlinUnsupportedError, KotlinWasmError } from './errors.js';
 import { buildResult, compileFailureResult } from './output.js';
+import { prepareSource, splitLines } from './prelude.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_COMPILE_TIMEOUT_MS = 180000;
@@ -259,7 +260,7 @@ function stopRecord(record, message) {
   records.delete(record.key);
 }
 
-function runOnRecord(record, { code, fileName, timeoutMs, compileTimeoutMs }) {
+function runOnRecord(record, { source, inputLines, fileName, timeoutMs, compileTimeoutMs }) {
   return withLock(record, () => {
     if (record.dead) throw record.failure || new KotlinWasmError('The Kotlin worker is not running.');
     return new Promise((resolve, reject) => {
@@ -313,7 +314,13 @@ function runOnRecord(record, { code, fileName, timeoutMs, compileTimeoutMs }) {
         reject(new KotlinWasmError(`The Kotlin compiler did not answer within ${Math.round(compileTimeoutMs / 1000)} s.`));
       }, compileTimeoutMs);
 
-      record.worker.postMessage({ type: 'run', id, source: code, fileName });
+      record.worker.postMessage({
+        type: 'run',
+        id,
+        source,
+        inputLines: inputLines || [],
+        fileName
+      });
     });
   });
 }
@@ -357,7 +364,7 @@ export async function createNodeEngine(options = {}) {
     capabilities: {
       language: 'kotlin',
       compiler: COMPILER_VERSION,
-      stdin: false,
+      stdin: true,
       wasmGc: true,
       analysis: false
     },
@@ -367,20 +374,22 @@ export async function createNodeEngine(options = {}) {
       await warmRecord(current);
     },
 
-    async run({ code, fileName, timeoutMs, compileTimeoutMs }) {
+    async run({ code, input, fileName, timeoutMs, compileTimeoutMs }) {
       if (disposed) throw new Error('This compiler has been disposed.');
       const runTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS;
       const compileTimeout =
         Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS;
+      const prepared = prepareSource(code, input);
       const current = await getRecord();
       const outcome = await runOnRecord(current, {
-        code,
+        source: prepared.source,
+        inputLines: splitLines(input),
         fileName,
         timeoutMs: runTimeout,
         compileTimeoutMs: compileTimeout
       });
       if (outcome.answer && !outcome.answer.ok) {
-        return compileFailureResult(outcome.answer, code, fileName);
+        return compileFailureResult(outcome.answer, code, fileName, prepared.mapOffset);
       }
       return buildResult({
         chunks: outcome.chunks || [],

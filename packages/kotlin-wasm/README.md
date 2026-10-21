@@ -8,7 +8,7 @@ anywhere.
 ```js
 import { createCompiler } from '@live-codes/kotlin-wasm';
 
-const compiler = await createCompiler('kotlin');
+const compiler = await createCompiler();
 const result = await compiler.run(`
 data class Point(val x: Int, val y: Int)
 
@@ -33,16 +33,17 @@ npx --package @live-codes/kotlin-wasm kotlin-wasm-copy-assets public/kotlin
 ```
 
 ```js
-const compiler = await createCompiler('kotlin', {
+const compiler = await createCompiler({
   baseUrl: new URL('/kotlin/', location.href)
 });
 ```
 
 ## API
 
-### `createCompiler(language = 'kotlin', options)`
+### `createCompiler(options)`
 
-Returns a promise for a compiler. The toolchain is loaded here, so a bad
+Returns a promise for a compiler. Kotlin is the only language this package
+runs, so there is no language argument. The toolchain is loaded here, so a bad
 `baseUrl` fails at this point rather than on the first run. In the browser this
 also compiles an empty program once, so the first user run is warm.
 
@@ -59,8 +60,8 @@ The returned object:
 | `language` | `kotlin`. |
 | `fileName` | The diagnostic file name. |
 | `compilerVersion` | `2.5.0-dev-9169`. |
-| `capabilities` | `{ language, compiler, stdin: false, wasmGc: true, analysis: false }`. |
-| `run(code, input?, runOptions?)` | Compile and run. `input` must be empty; see stdin below. |
+| `capabilities` | `{ language, compiler, stdin: true, wasmGc: true, analysis: false }`. |
+| `run(code, input?, runOptions?)` | Compile and run. `input` is pre-supplied line-based stdin; see below. |
 | `warm()` | Compile a throwaway program. Optional; `createCompiler` already loaded the toolchain. |
 | `dispose()` | Release this compiler's hold on the shared toolchain. Further runs throw. |
 
@@ -80,14 +81,39 @@ The returned object:
 | `runMs` | Wall clock for the run, or `null` if it did not run. |
 
 A failed compile does not throw: it comes back with `exitCode: null` and
-`errors` filled in. Only a load failure, a disposed compiler, a bad argument or
-non-empty stdin throws.
+`errors` filled in. Only a load failure, a disposed compiler or a bad argument
+throws.
 
 ### Stdin
 
-Kotlin/Wasm has no console input. A non-empty `input` throws
-`KotlinStdinUnsupportedError`; a host that supports stdin should route that
-program to a different engine.
+Kotlin/Wasm's standard library has no console input: `readLine` is unresolved
+and `readlnOrNull` reads nothing. When you pass `input` (or the source uses one
+of those functions), the package prepends a small prelude that shadows
+`readln()`, `readlnOrNull()` and `readLine()` and reads pre-supplied lines
+through a `@JsFun` host hook.
+
+```js
+const result = await compiler.run(
+  `fun main() {
+       println("name: " + readln())
+       println("age: " + readlnOrNull())
+   }`,
+  'Ada\n36\n'
+);
+// stdout: name: Ada\nage: 36\n
+```
+
+- Input is split on `\r\n`, `\n` or `\r`; a trailing newline does not add an
+  extra empty line.
+- `readlnOrNull()` and `readLine()` return `null` at EOF. `readln()` throws
+  `NoSuchElementException("EOF")`.
+- **It is not interactive.** All input is available up front; a prompt-then-read
+  interaction still sees the next pre-supplied line. `System.in` and binary
+  streams are not available.
+- If your source defines its own no-argument `readln`, `readlnOrNull` or
+  `readLine`, the prelude leaves that definition alone.
+- Diagnostics are mapped back to the caller's line numbers even though the
+  prelude is inserted after the leading package/import block.
 
 ### `LANGUAGE_IDS`, `COMPILER_VERSION` and errors
 
@@ -96,8 +122,7 @@ import {
   LANGUAGE_IDS,          // ['kotlin']
   COMPILER_VERSION,      // '2.5.0-dev-9169'
   KotlinWasmError,
-  KotlinUnsupportedError,
-  KotlinStdinUnsupportedError
+  KotlinUnsupportedError
 } from '@live-codes/kotlin-wasm';
 ```
 
@@ -117,7 +142,7 @@ a content string — `importScripts()` the IIFE build instead:
 
 ```js
 importScripts('kotlin-wasm.global.js'); // from @live-codes/kotlin-wasm/iife
-const compiler = await self.kotlinWasm.createCompiler('kotlin', {
+const compiler = await self.kotlinWasm.createCompiler({
   baseUrl: 'https://cdn.jsdelivr.net/npm/@live-codes/kotlin-wasm/assets/'
 });
 ```
@@ -144,7 +169,7 @@ it. Node 22 or later is required.
 ```js
 import { createCompiler } from '@live-codes/kotlin-wasm';
 
-const compiler = await createCompiler('kotlin');
+const compiler = await createCompiler();
 await compiler.warm(); // optional: pay the first compile up front
 const result = await compiler.run('fun main() { println(42) }');
 compiler.dispose();
@@ -166,6 +191,9 @@ Verified in Node and Chromium; `npm test` compiles and runs it.
 - **Exact `print`/`println` output.** The generated import object routes `print`
   through a `write` hook and `println` through `console.log`, so the package
   keeps the distinction instead of turning every call into a line.
+- **Line-based stdin** for `readln()`, `readlnOrNull()` and `readLine()`,
+  pre-supplied as a string, `Uint8Array` or `ArrayBuffer`; see
+  [Stdin](#stdin).
 - **Diagnostics** with `file:line:column`, e.g.
   `Main.kt:1:25: error: Initializer type mismatch: expected 'Int', actual 'String'.`
 - **A program timeout that leaves the compiler warm.** The program runs in its
@@ -178,7 +206,10 @@ Program runs are tens of milliseconds.
 ## Limitations
 
 - **Single file, standard library only.** No other libraries, no Gradle, no
-  multi-file projects, no stdin. The compiler takes one source string.
+  multi-file projects. The compiler takes one source string.
+- **Stdin is line-based and pre-supplied.** There is no interactive console:
+  `readln()` reads the next supplied line, and `System.in`/binary streams are not
+  available.
 - **No Analysis API.** This package compiles and runs; inline diagnostics and
   completion from the real Analysis API are not included. (The upstream
   toolchain has a separate 75 MB image for that.)
@@ -200,8 +231,9 @@ Program runs are tens of milliseconds.
   the assets need CORS but no particular `Content-Type`.
 - `run()` returns `{ output, errors, exitCode }` directly; map `errors` to the
   compiler panel. Diagnostics are already `file:line:column: severity: message`.
-- A non-empty stdin throws `KotlinStdinUnsupportedError`; route that program to
-  a fallback engine or ignore input.
+- Pass the editor's stdin text as `run(code, input)`. Input is line-based and
+  pre-supplied: `readln()`, `readlnOrNull()` and `readLine()` work, but a
+  prompt-then-respond interaction cannot be supported.
 - Set `runOptions.timeoutMs` for a runaway program. The package terminates the
   program worker and keeps the compiler worker alive.
 - Lazy-load the asset only when a module actually uses Kotlin, the way the other

@@ -4,14 +4,13 @@ import test, { after, before } from 'node:test';
 import {
   createCompiler,
   LANGUAGE_IDS,
-  COMPILER_VERSION,
-  KotlinStdinUnsupportedError
+  COMPILER_VERSION
 } from '../src/index.node.js';
 
 let compiler;
 
 before(async () => {
-  compiler = await createCompiler('kotlin');
+  compiler = await createCompiler();
   // Pay the image's JIT warm-up once, outside the tests.
   await compiler.warm();
 });
@@ -26,14 +25,14 @@ test('there is one language and the compiler is the pinned K2 build', () => {
   assert.deepEqual(compiler.capabilities, {
     language: 'kotlin',
     compiler: '2.5.0-dev-9169',
-    stdin: false,
+    stdin: true,
     wasmGc: true,
     analysis: false
   });
 });
 
-test('an unknown language is rejected with the list of valid ones', async () => {
-  await assert.rejects(() => createCompiler('scala'), /Unknown language/);
+test('createCompiler takes options, not a language argument', async () => {
+  await assert.rejects(() => createCompiler('kotlin'), /options object/);
 });
 
 test('hello: print and println keep their exact newlines', async () => {
@@ -112,11 +111,58 @@ test('a runtime exception is reported with exit code 1', async () => {
   assert.match(result.errors[0], /boom/);
 });
 
-test('stdin is refused with a typed error before compiling', async () => {
-  await assert.rejects(
-    () => compiler.run('fun main() {}', 'input'),
-    (error) => error instanceof KotlinStdinUnsupportedError
+test('stdin: readln, readlnOrNull and readLine consume the supplied lines', async () => {
+  const result = await compiler.run(
+    `fun main() {
+    println("a=" + readlnOrNull())
+    println("b=" + readln())
+    println("c=" + readLine())
+    println("d=" + readlnOrNull())
+}
+`,
+    'one\ntwo\nthree'
   );
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, 'a=one\nb=two\nc=three\nd=null\n');
+});
+
+test('stdin: CRLF input and a trailing newline are handled like Kotlin lines', async () => {
+  const result = await compiler.run(
+    `fun main() {
+    println(readlnOrNull())
+    println(readlnOrNull())
+    println(readlnOrNull())
+}
+`,
+    '1\r\n2\r\n'
+  );
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.stdout, '1\n2\nnull\n');
+});
+
+test('stdin: readln() throws at EOF', async () => {
+  const result = await compiler.run(`fun main() { readln() }`);
+  assert.equal(result.exitCode, 1);
+  assert.match(result.errors.join('\n'), /EOF/);
+});
+
+test('stdin: diagnostics still point at the caller’s line after the prelude', async () => {
+  const result = await compiler.run(
+    `import kotlin.math.PI
+
+fun main() {
+    val n: Int = "bad"
+    println(n)
+}
+`,
+    'some input'
+  );
+
+  assert.equal(result.exitCode, null);
+  assert.match(result.errors[0], /^Main\.kt:4:\d+: error: Initializer type mismatch/);
 });
 
 test('a runaway program is stopped and the next run works', { timeout: 180000 }, async () => {

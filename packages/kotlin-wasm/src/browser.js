@@ -1,6 +1,7 @@
 import { COMPILER_VERSION } from './language.js';
 import { KotlinUnsupportedError, KotlinWasmError } from './errors.js';
 import { buildResult, compileFailureResult } from './output.js';
+import { JS_STDIN_HOOK, prepareSource, splitLines } from './prelude.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_COMPILE_TIMEOUT_MS = 180000;
@@ -239,8 +240,8 @@ function releaseRecord(record, onProgress) {
   for (const url of record.blobUrls) URL.revokeObjectURL(url);
 }
 
-async function runInWorker(record, { code, fileName, timeoutMs }) {
-  const answer = await record.request('compile', code, '');
+async function runInWorker(record, { source, timeoutMs, input }) {
+  const answer = await record.request('compile', source, '');
   if (answer?.error) throw new KotlinWasmError(answer.error);
 
   const compileMs = Number(answer?.milliseconds) || 0;
@@ -252,12 +253,13 @@ async function runInWorker(record, { code, fileName, timeoutMs }) {
   const outcome = await runCompiledProgram(
     answer.files,
     (chunk) => chunks.push(chunk),
-    timeoutMs
+    timeoutMs,
+    input
   );
   return { answer, compileMs, chunks, ...outcome };
 }
 
-async function runCompiledProgram(files, onChunk, timeoutMs) {
+async function runCompiledProgram(files, onChunk, timeoutMs, input = '') {
   const find = (name) => {
     const file = (files || []).find((entry) => entry.name === name);
     if (!file) throw new KotlinWasmError(`The Kotlin compiler did not emit ${name}.`);
@@ -286,6 +288,9 @@ async function runCompiledProgram(files, onChunk, timeoutMs) {
   );
   const runner = blob(
     `
+    const inputLines = ${JSON.stringify(splitLines(input))};
+    let inputIndex = 0;
+    globalThis.${JS_STDIN_HOOK} = () => inputIndex < inputLines.length ? inputLines[inputIndex++] : null;
     globalThis.write = (message) => postMessage({ output: String(message), stream: 'stdout', newline: false });
     const out = (...values) => postMessage({ output: values.map(String).join(' '), stream: 'stdout', newline: true });
     const err = (...values) => postMessage({ output: values.map(String).join(' '), stream: 'stderr', newline: true });
@@ -340,7 +345,7 @@ export async function createBrowserEngine(options = {}) {
     capabilities: {
       language: 'kotlin',
       compiler: COMPILER_VERSION,
-      stdin: false,
+      stdin: true,
       wasmGc: true,
       analysis: false
     },
@@ -349,12 +354,17 @@ export async function createBrowserEngine(options = {}) {
       await record.warm();
     },
 
-    async run({ code, fileName, timeoutMs }) {
+    async run({ code, input, fileName, timeoutMs }) {
       if (disposed) throw new Error('This compiler has been disposed.');
       const runTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS;
-      const outcome = await runInWorker(record, { code, fileName, timeoutMs: runTimeout });
+      const prepared = prepareSource(code, input);
+      const outcome = await runInWorker(record, {
+        source: prepared.source,
+        timeoutMs: runTimeout,
+        input
+      });
       if (outcome.answer && !outcome.answer.ok) {
-        return compileFailureResult(outcome.answer, code, fileName);
+        return compileFailureResult(outcome.answer, code, fileName, prepared.mapOffset);
       }
       return buildResult({
         chunks: outcome.chunks || [],
