@@ -28,7 +28,11 @@ const TYPES = {
 };
 
 const send = (res, status, headers, body) => {
-  res.writeHead(status, { 'cache-control': 'no-cache', ...headers });
+  res.writeHead(status, {
+    'cache-control': 'no-cache',
+    'access-control-allow-origin': '*',
+    ...headers
+  });
   res.end(body);
 };
 

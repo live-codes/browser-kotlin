@@ -1,0 +1,98 @@
+# Vendored real-Kotlin compiler assets
+
+Upstream toolchain: [`alex28sh/wasm-code-editor`](https://github.com/alex28sh/wasm-code-editor)
+(`compiler-host`): the published JVM jars of the **real Kotlin compiler (K2)**
+turned into a WebAssembly image with **Oracle GraalVM Web Image**
+(`native-image --tool:svm-wasm`).
+
+The prebuilt images were published by
+[`space-enthusiast/kotlin-on-web-playground`](https://github.com/space-enthusiast/kotlin-on-web-playground)
+(GitHub Pages). Copied from there on **2026-10-21**. Kotlin version:
+**2.5.0-dev-9169**.
+
+| File | Size | What it is |
+| --- | ---: | --- |
+| `kotlin-compiler-worker.js` | 4,020 B | **our wrapper** (see below) |
+| `kotlin-compiler-image.js` | 112,773 B | upstream generated GraalVM worker, unmodified |
+| `kotlin-compiler-worker.js.wasm.gz.0` | 13,000,000 B | first half of the gzipped compiler image |
+| `kotlin-compiler-worker.js.wasm.gz.1` | 12,826,360 B | second half |
+| `kotlin-stdlib-wasm-js.bin.gz` | 3,811,357 B | gzipped Wasm stdlib archive |
+| `kotlin-assets.json` | 467 B | parts, sizes and inflated SHA-256 |
+
+Total: **29,754,977 B (28.4 MiB)** gzipped, **86,854,635 B (82.8 MiB)**
+inflated. The compiler image is split so every file is under 20 MB; jsDelivr
+refuses files over that. The Analysis API image is deliberately not vendored.
+
+## How the compressed worker works
+
+The GraalVM loader requests `self.location.href + ".wasm"` for its module and
+`./kotlin-stdlib-wasm-js.bin` for the stdlib. `kotlin-compiler-worker.js` is a
+classic-worker wrapper: it patches `fetch`, reads `kotlin-assets.json`, fetches
+the listed gzip parts, concatenates them, inflates the result with
+`DecompressionStream`, and only then imports the generated
+`kotlin-compiler-image.js`. It also posts `asset-progress` messages so the
+package's `onProgress` reflects the download. The generated image is untouched.
+
+```
+new Worker('kotlin-compiler-worker.js')     // wrapper
+  ↓ patches fetch, importScripts
+kotlin-compiler-image.js                    // generated GraalVM worker
+  ↓ GraalVM.run()
+fetch(kotlin-compiler-worker.js.wasm)
+  → .gz.0 + .gz.1 concatenated → DecompressionStream → instantiate
+  ↓ appended worker glue
+fetch(kotlin-stdlib-wasm-js.bin.gz) → DecompressionStream → host.call('init', …)
+```
+
+DecompressionStream is supported in every browser that can run WasmGC
+(Chrome 80+, Firefox 113+, Safari 16.4+). If a host serves a `.gz` with
+`Content-Encoding: gzip`, the wrapper returns the already-inflated bytes instead
+of decompressing twice.
+
+The browser package also rewrites the image at runtime to set `config.wasm_path`
+and the stdlib URL to absolute asset URLs, because it may load the worker from a
+same-origin Blob URL while the assets live on a CDN.
+
+## SHA-256 (shipped, compressed)
+
+```
+9b106ed2490ab2e2c1d6e3fb9013115b7b18d43a8d1ff961ee1eca1ce4a9308e         467  kotlin-assets.json
+2188cb431a4ef48c158f00d95ab3989dfdbd1b6264d577464243581dd2406ac5      112773  kotlin-compiler-image.js
+29f173371e2b538303917f82f45122a1db7243b3874ee3d19039e7ed7dd4bc71        4020  kotlin-compiler-worker.js
+b2af6ffb97c5a9d57b5354e73093f5889f852346df4d11da95b535eb8a753520    13000000  kotlin-compiler-worker.js.wasm.gz.0
+acc9fbf3c1779b98594d2a37b7887f50b1e93e14f1a16a63f3e40d4cd395fa83    12826360  kotlin-compiler-worker.js.wasm.gz.1
+8fec8e6f1cb4b5696240c8630b481d259018c4308e4dfabad339a7cb65c3e4e0     3811357  kotlin-stdlib-wasm-js.bin.gz
+```
+
+Inflated bytes match the upstream artifacts:
+
+```
+e197bbe3e265505997231cc1b907ab33acdb507a88647308e7790cc7afdb2512  74,849,307  compiler image
+1745038e115f1b1f591a0fdfd745458c91fa938dc4303898d4d2a63aacfabf21  12,005,328  stdlib archive
+```
+
+`../scripts/asset-receipts.mjs` verifies both and regenerates
+`../src/asset-receipts.js`.
+
+## Protocol
+
+`kotlin-compiler-image.js` publishes `globalThis.kotlinCompilerHost` and answers:
+
+```js
+worker.postMessage({ id, operation: 'compile', text: source, argument: '' });
+// -> { id, answer: '{"ok":true,"files":[...],"diagnostics":[...],"milliseconds":...}' }
+```
+
+The returned files (`main.wasm`, `main.mjs`, `main.import-object.mjs`,
+`main.js-builtins.mjs`) are rewired to Blob URLs and imported in a module worker
+by the package's browser engine.
+
+## Licensing
+
+**Unconfirmed for redistribution.** The Kotlin compiler itself is Apache-2.0;
+the GraalVM Web Image runtime embedded in the generated `.wasm` is governed by
+Oracle GraalVM terms (the upstream build used Oracle GraalVM 25i4, under
+Oracle's GraalVM Free Terms and Conditions). The publishing repository has no
+licence file. These assets are vendored for evaluation only; confirm the terms
+with the upstream authors before shipping them. See
+[`../THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md).

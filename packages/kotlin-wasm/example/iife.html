@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>@live-codes/kotlin-wasm — classic worker example</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; }
+    pre { background: #f6f6f8; padding: 1rem; overflow: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>@live-codes/kotlin-wasm — IIFE in a classic worker</h1>
+  <p>The same setup LiveCodes uses: <code>importScripts()</code> the IIFE build, create a compiler once, then run.</p>
+  <pre id="out">loading…</pre>
+
+  <script>
+    const out = document.getElementById('out');
+    const worker = new Worker('./worker.js');
+
+    worker.onmessage = ({ data }) => {
+      if (data.type === 'ready') {
+        worker.postMessage({
+          id: 1,
+          code: `
+data class Point(val x: Int, val y: Int)
+
+fun main() {
+    println("hello from a classic worker")
+    print("print "); print("stays "); println("on one line")
+    val p = Point(2, 3)
+    println("sum = \${p.x + p.y}")
+}
+`
+        });
+        return;
+      }
+      if (data.type === 'error' || data.error) {
+        out.textContent = data.message || data.error;
+        return;
+      }
+      out.textContent = JSON.stringify(data.result, null, 2);
+    };
+
+    worker.onerror = (event) => {
+      out.textContent = event.message || 'worker error';
+    };
+  </script>
+</body>
+</html>

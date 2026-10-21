@@ -24,9 +24,11 @@ Press **Run** (or Ctrl/Cmd+Enter). A static server is required because browsers
 block ES-module Workers and WebAssembly over `file://`; `serve.mjs` mainly adds
 `Content-Type: application/wasm`. Nothing is compiled server-side.
 
-The real compiler's image and stdlib are shipped gzipped (25.8 MB + 3.8 MB). A
-small worker wrapper inflates them with `DecompressionStream` before the
-GraalVM loader uses them, so the browser transfers ~30 MB instead of ~87 MB.
+The real compiler's image and stdlib are shipped gzipped: the compiler is split
+into two sub-20 MB parts (13.0 MB + 12.8 MB) plus a 3.8 MB stdlib archive. A
+small worker wrapper concatenates and inflates them with `DecompressionStream`
+before the GraalVM loader uses them, so the browser transfers ~30 MB instead of
+~87 MB.
 
 ```sh
 npm test                # Node smoke test for the minikotlin demo
@@ -34,6 +36,15 @@ npm test                # Node smoke test for the minikotlin demo
 
 Every asset is committed, so a clone runs both demos and the smoke test without
 a build step.
+
+## npm package
+
+[`packages/kotlin-wasm`](packages/kotlin-wasm) is **`@live-codes/kotlin-wasm`**:
+the real K2 compiler behind a `createCompiler('kotlin', { baseUrl })` API, in the
+shape of [`@live-codes/clang-wasm`](https://github.com/live-codes/clang-wasm).
+It has ESM and Node entries, an IIFE build for classic workers, a
+`kotlin-wasm-copy-assets` CLI, asset receipts and tests. `real.html` uses the
+same assets and worker wrapper.
 
 ## Measured
 
@@ -90,7 +101,8 @@ to a GraalVM Web Image by
 wasm; no JVM is installed. The prebuilt image used here was published by
 [`space-enthusiast/kotlin-on-web-playground`](https://github.com/space-enthusiast/kotlin-on-web-playground).
 
-`real.html` starts the classic worker `vendor/kotlin-web/kotlin-compiler-worker.js`.
+`real.html` starts the classic worker
+`packages/kotlin-wasm/assets/kotlin-compiler-worker.js`.
 That file is a small wrapper: it patches `fetch`, then imports the generated
 GraalVM worker (`kotlin-compiler-image.js`). The compiler image and stdlib are
 requested as `.gz`, piped through `DecompressionStream`, and only then handed to
@@ -111,8 +123,9 @@ Only the compiler image is vendored — the 75 MB **Analysis API** image (used
 upstream for completion and inline diagnostics) is deliberately omitted. This
 demo shows compiler diagnostics, not an IDE.
 
-See [`vendor/kotlin-web/README.md`](vendor/kotlin-web/README.md) for provenance
-and checksums.
+See [`packages/kotlin-wasm/README.md`](packages/kotlin-wasm/README.md) for the
+npm package API and [`packages/kotlin-wasm/assets/README.md`](packages/kotlin-wasm/assets/README.md)
+for provenance and checksums.
 
 ## Caveats for LiveCodes
 
@@ -135,10 +148,11 @@ Open items:
 - **The real compiler is single-file, stdlib-only.** No other libraries, no
   stdin, no multi-file projects, no Gradle. The upstream Analysis API is not
   included here.
-- **Payload.** ~30 MB compressed (25.8 MB compiler image + 3.8 MB stdlib;
-  ~87 MB after inflation), cached by the browser. The image and stdlib are
-  inflated in the worker with `DecompressionStream`; no server-side decompression
-  is involved. LiveCodes should lazy-load it only when a snippet uses Kotlin.
+- **Payload.** ~30 MB compressed (13.0 MB + 12.8 MB compiler parts + 3.8 MB
+  stdlib; ~87 MB after inflation), cached by the browser. The image and stdlib
+  are inflated in the worker with `DecompressionStream`; no server-side
+  decompression is involved. LiveCodes should lazy-load it only when a snippet
+  uses Kotlin.
 - **WasmGC is required** — Chrome/Edge 119+, Firefox 120+, Safari 18.2+. No
   feature detection yet; unsupported browsers fail at instantiation.
 - **Timeouts.** A program is stopped after 15 s in both demos.

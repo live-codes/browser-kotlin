@@ -1,0 +1,58 @@
+{
+  "name": "@live-codes/kotlin-wasm",
+  "version": "0.1.0",
+  "description": "Run Kotlin with one API, on the real K2 compiler compiled to WebAssembly",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/live-codes/browser-kotlin.git",
+    "directory": "packages/kotlin-wasm"
+  },
+  "homepage": "https://github.com/live-codes/browser-kotlin/tree/main/packages/kotlin-wasm#readme",
+  "bugs": "https://github.com/live-codes/browser-kotlin/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "node": "./src/index.node.js",
+      "browser": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./iife": "./dist/kotlin-wasm.global.js"
+  },
+  "bin": {
+    "kotlin-wasm-copy-assets": "./bin/copy-assets.mjs"
+  },
+  "files": [
+    "src",
+    "bin",
+    "scripts",
+    "dist",
+    "assets",
+    "THIRD-PARTY-NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:iife": "node scripts/build-iife.mjs",
+    "assets": "node scripts/asset-receipts.mjs",
+    "test": "node --experimental-wasm-exnref --test \"test/*.test.js\"",
+    "prepack": "npm run build:iife",
+    "prepublishOnly": "npm test"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  },
+  "keywords": [
+    "kotlin",
+    "kotlin-wasm",
+    "k2",
+    "wasm",
+    "webassembly",
+    "compiler",
+    "playground"
+  ]
+}

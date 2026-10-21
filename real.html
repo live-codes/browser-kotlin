@@ -228,12 +228,17 @@ function showDiagnostics(text) {
 // The compiler worker is a classic GraalVM Web Image worker. It publishes
 // `kotlinCompilerHost` and answers {id, operation, text, argument}.
 function createCompiler() {
-  const worker = new Worker('./vendor/kotlin-web/kotlin-compiler-worker.js');
+  const worker = new Worker('./packages/kotlin-wasm/assets/kotlin-compiler-worker.js');
   let nextId = 1;
   const pending = new Map();
   let failure = null;
 
   worker.onmessage = ({ data }) => {
+    if (data.type === 'asset-error') {
+      console.error('[kotlin-worker]', data.message);
+      showDiagnostics(data.message);
+      return;
+    }
     const resolve = pending.get(data.id);
     if (!resolve) return;
     pending.delete(data.id);

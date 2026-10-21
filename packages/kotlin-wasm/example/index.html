@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>@live-codes/kotlin-wasm — browser example</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; }
+    pre { background: #f6f6f8; padding: 1rem; overflow: auto; white-space: pre-wrap; }
+    code { font-family: ui-monospace, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <h1>@live-codes/kotlin-wasm</h1>
+  <p>Compiling and running real Kotlin entirely in this tab. First load fetches ~30 MB of gzipped assets.</p>
+  <pre id="out">loading…</pre>
+
+  <script type="module">
+    import { createCompiler } from '../src/index.js';
+
+    const out = document.getElementById('out');
+    const base =
+      new URLSearchParams(location.search).get('base') ||
+      new URL('../assets/', location.href).href;
+    try {
+      const compiler = await createCompiler('kotlin', { baseUrl: base });
+      const result = await compiler.run(`
+data class Point(val x: Int, val y: Int)
+
+fun main() {
+    println("hello from @live-codes/kotlin-wasm")
+    val p = Point(2, 3)
+    println("p = $p, sum = \${p.x + p.y}")
+    print("print "); print("stays "); println("on one line")
+}
+`);
+      out.textContent = JSON.stringify(result, null, 2);
+      compiler.dispose();
+    } catch (error) {
+      out.textContent = String(error?.stack || error);
+    }
+  </script>
+</body>
+</html>

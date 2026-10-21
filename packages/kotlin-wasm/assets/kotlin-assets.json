@@ -1,0 +1,17 @@
+{
+  "compiler": {
+    "parts": [
+      "kotlin-compiler-worker.js.wasm.gz.0",
+      "kotlin-compiler-worker.js.wasm.gz.1"
+    ],
+    "gzBytes": 25826360,
+    "rawBytes": 74849307,
+    "rawSha256": "e197bbe3e265505997231cc1b907ab33acdb507a88647308e7790cc7afdb2512"
+  },
+  "stdlib": {
+    "file": "kotlin-stdlib-wasm-js.bin.gz",
+    "gzBytes": 3811357,
+    "rawBytes": 12005328,
+    "rawSha256": "1745038e115f1b1f591a0fdfd745458c91fa938dc4303898d4d2a63aacfabf21"
+  }
+}
