@@ -23,7 +23,7 @@
     "./iife": "./dist/kotlin-wasm.global.js"
   },
   "bin": {
-    "kotlin-wasm-copy-assets": "./bin/copy-assets.mjs"
+    "kotlin-wasm-copy-assets": "bin/copy-assets.mjs"
   },
   "files": [
     "src",
@@ -31,6 +31,7 @@
     "scripts",
     "dist",
     "assets",
+    "toolchain.lock.json",
     "NOTICE",
     "THIRD-PARTY-NOTICES.md"
   ],

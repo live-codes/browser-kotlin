@@ -10,6 +10,12 @@ The prebuilt images were published by
 (GitHub Pages). Copied from there on **2026-10-21**. Kotlin version:
 **2.5.0-dev-9169**.
 
+Pinned source commits: compiler host
+`alex28sh/wasm-code-editor@02a8916077b1ea697808f258dee5a5406c887774`, prebuilt
+image `space-enthusiast/kotlin-on-web-playground@5e5a40d49b5d0ddbf8a869ff03f5ee1aca640131`.
+The full receipt, including every gzip part and inflated archive, is in
+[`../toolchain.lock.json`](../toolchain.lock.json).
+
 | File | Size | What it is |
 | --- | ---: | --- |
 | `kotlin-compiler-worker.js` | 4,020 B | **our wrapper** (see below) |

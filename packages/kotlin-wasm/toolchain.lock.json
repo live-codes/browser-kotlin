@@ -1,0 +1,62 @@
+{
+  "language": "kotlin",
+  "compiler": {
+    "version": "2.5.0-dev-9169",
+    "host": {
+      "repository": "https://github.com/alex28sh/wasm-code-editor",
+      "commit": "02a8916077b1ea697808f258dee5a5406c887774"
+    },
+    "prebuilt": {
+      "repository": "https://github.com/space-enthusiast/kotlin-on-web-playground",
+      "commit": "5e5a40d49b5d0ddbf8a869ff03f5ee1aca640131",
+      "fetched": "2026-10-21"
+    },
+    "assets": {
+      "compilerImage": {
+        "gzParts": [
+          {
+            "file": "kotlin-compiler-worker.js.wasm.gz.0",
+            "bytes": 13000000,
+            "sha256": "b2af6ffb97c5a9d57b5354e73093f5889f852346df4d11da95b535eb8a753520"
+          },
+          {
+            "file": "kotlin-compiler-worker.js.wasm.gz.1",
+            "bytes": 12826360,
+            "sha256": "acc9fbf3c1779b98594d2a37b7887f50b1e93e14f1a16a63f3e40d4cd395fa83"
+          }
+        ],
+        "gzBytes": 25826360,
+        "rawBytes": 74849307,
+        "rawSha256": "e197bbe3e265505997231cc1b907ab33acdb507a88647308e7790cc7afdb2512"
+      },
+      "stdlib": {
+        "file": "kotlin-stdlib-wasm-js.bin.gz",
+        "gzBytes": 3811357,
+        "rawBytes": 12005328,
+        "rawSha256": "1745038e115f1b1f591a0fdfd745458c91fa938dc4303898d4d2a63aacfabf21"
+      }
+    }
+  },
+  "generatedHost": {
+    "file": "kotlin-compiler-image.js",
+    "bytes": 112773,
+    "sha256": "2188cb431a4ef48c158f00d95ab3989dfdbd1b6264d577464243581dd2406ac5"
+  },
+  "wrapper": {
+    "file": "kotlin-compiler-worker.js",
+    "bytes": 4020,
+    "sha256": "29f173371e2b538303917f82f45122a1db7243b3874ee3d19039e7ed7dd4bc71"
+  },
+  "manifest": {
+    "file": "kotlin-assets.json",
+    "bytes": 467,
+    "sha256": "9b106ed2490ab2e2c1d6e3fb9013115b7b18d43a8d1ff961ee1eca1ce4a9308e"
+  },
+  "licenseText": {
+    "file": "LICENSE",
+    "source": "https://github.com/JetBrains/kotlin/blob/master/license/LICENSE.txt",
+    "fetched": "2026-10-21",
+    "bytes": 11358,
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  }
+}

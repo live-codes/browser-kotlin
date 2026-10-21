@@ -241,12 +241,21 @@ Program runs are tens of milliseconds.
 - Lazy-load the asset only when a module actually uses Kotlin, the way the other
   wasm languages work.
 
+## Provenance
+
+[`toolchain.lock.json`](toolchain.lock.json) pins the toolchain: Kotlin
+`2.5.0-dev-9169`, the compiler host
+`alex28sh/wasm-code-editor@02a8916`, the prebuilt image
+`space-enthusiast/kotlin-on-web-playground@5e5a40d`, the SHA-256 of every
+gzipped part and inflated archive, and the Apache license text. `npm run assets`
+fails if the assets and the lock disagree.
+
 ## Development
 
 ```sh
 cd packages/kotlin-wasm
 npm install
-npm run assets          # regenerate src/asset-receipts.js after changing assets
+npm run assets          # regenerate receipts; verify assets and toolchain.lock.json
 npm run build:iife      # rewrite dist/kotlin-wasm.global.js (committed)
 npm test                # real compiles in Node, with the exnref flag
 node ../../serve.mjs 8001

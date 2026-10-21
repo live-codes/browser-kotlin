@@ -24,9 +24,12 @@ project. The prebuilt images were published by
 The upstream build used Oracle GraalVM 25i4, under Oracle's GraalVM Free Terms
 and Conditions. The generated image embeds GraalVM runtime code; the generated
 script carries GPLv2 + Classpath Exception headers. The publishing repository
-has no licence file. **Treat these assets as evaluation-only until the terms
-are confirmed with the upstream authors; this package does not grant a licence
-to redistribute them.**
+has no licence file. The exact commits and every asset hash are pinned in
+[`toolchain.lock.json`](toolchain.lock.json): host
+`alex28sh/wasm-code-editor@02a8916`, prebuilt image
+`space-enthusiast/kotlin-on-web-playground@5e5a40d`. **Treat these assets as
+evaluation-only until the terms are confirmed with the upstream authors; this
+package does not grant a licence to redistribute them.**
 
 ## What this package changed
 
