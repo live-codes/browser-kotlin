@@ -1,7 +1,7 @@
 # Third-party notices
 
-This package's own code is **MIT** (see `LICENSE`). This file is the attribution
-and provenance record for the toolchain in `assets/`.
+This package's own code is **Apache-2.0** (see `LICENSE` and `NOTICE`). This
+file is the attribution and provenance record for the toolchain in `assets/`.
 
 ## Assets
 
@@ -11,8 +11,8 @@ and provenance record for the toolchain in `assets/`.
 | `assets/kotlin-compiler-worker.js.wasm.gz.0` | First half of the gzipped compiler image | Same as above |
 | `assets/kotlin-compiler-worker.js.wasm.gz.1` | Second half of the gzipped compiler image | Same as above |
 | `assets/kotlin-stdlib-wasm-js.bin.gz` | The Kotlin/Wasm standard library archive, gzipped | Apache-2.0 |
-| `assets/kotlin-assets.json` | Manifest of parts, sizes and inflated SHA-256 | MIT (this package) |
-| `assets/kotlin-compiler-worker.js` | The decompression wrapper around the generated worker | MIT (this package) |
+| `assets/kotlin-assets.json` | Manifest of parts, sizes and inflated SHA-256 | Apache-2.0 (this package) |
+| `assets/kotlin-compiler-worker.js` | The decompression wrapper around the generated worker | Apache-2.0 (this package) |
 
 The compiler itself is the **real Kotlin compiler (K2)**, version
 `2.5.0-dev-9169`, which is Apache-2.0. It was turned into a WebAssembly image

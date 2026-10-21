@@ -258,7 +258,9 @@ before copying, so a stale pairing fails there rather than on someone's page.
 
 ## Licence
 
-MIT for this package. The assets are third-party builds: the Kotlin compiler is
-Apache-2.0, and the GraalVM Web Image runtime carries Oracle GraalVM terms.
-See [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) for provenance and the
-redistribution caveat.
+Apache-2.0 for this package's own code, matching the Kotlin compiler. The
+assets are third-party builds: the Kotlin compiler and Kotlin/Wasm standard
+library are Apache-2.0, and the GraalVM Web Image runtime carries Oracle
+GraalVM terms. See [`LICENSE`](LICENSE), [`NOTICE`](NOTICE) and
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) for attribution, provenance
+and the redistribution caveat.

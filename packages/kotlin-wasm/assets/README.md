@@ -89,10 +89,13 @@ by the package's browser engine.
 
 ## Licensing
 
-**Unconfirmed for redistribution.** The Kotlin compiler itself is Apache-2.0;
-the GraalVM Web Image runtime embedded in the generated `.wasm` is governed by
-Oracle GraalVM terms (the upstream build used Oracle GraalVM 25i4, under
-Oracle's GraalVM Free Terms and Conditions). The publishing repository has no
-licence file. These assets are vendored for evaluation only; confirm the terms
-with the upstream authors before shipping them. See
+This package's own code — including the decompression wrapper and the manifest
+— is **Apache-2.0**; see [`../LICENSE`](../LICENSE) and [`../NOTICE`](../NOTICE).
+
+**The compiler assets are unconfirmed for redistribution.** The Kotlin compiler
+itself is Apache-2.0; the GraalVM Web Image runtime embedded in the generated
+`.wasm` is governed by Oracle GraalVM terms (the upstream build used Oracle
+GraalVM 25i4, under Oracle's GraalVM Free Terms and Conditions). The publishing
+repository has no licence file. These assets are vendored for evaluation only;
+confirm the terms with the upstream authors before shipping them. See
 [`../THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md).
