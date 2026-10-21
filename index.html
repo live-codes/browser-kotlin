@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kotlin in the browser — proof of concept</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --line: #8884;
+    --dim: #888;
+    --err: #d0334a;
+    --ok: #178a55;
+    --accent: #7c5cff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
+         font: 14px/1.5 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+           padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  #status { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #status[data-busy]::before { content: "◐ "; }
+  #status[data-ok] { color: var(--ok); }
+  #status[data-err] { color: var(--err); }
+  main { flex: 1; display: flex; min-height: 0; }
+  section { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  section + section { border-left: 1px solid var(--line); }
+  h2 { margin: 0; padding: 6px 12px; font-size: 11px; font-weight: 600;
+       letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+  textarea, pre { margin: 0; padding: 12px 12px 24px; border: 0; background: transparent;
+                  font: 13px/1.45 ui-monospace, Consolas, monospace; tab-size: 4;
+                  white-space: pre; overflow: auto; color: inherit; }
+  textarea { flex: 1; resize: none; outline: none; }
+  #src { flex: 1; }
+  #out { flex: 1; }
+  #diag { flex: 0 1 auto; max-height: 42%; color: var(--err); border-top: 1px solid var(--line); }
+  [hidden] { display: none !important; }
+  select, button { font: 12px system-ui; padding: 4px 10px; }
+  button { font-weight: 600; }
+  kbd { font: 11px ui-monospace, monospace; color: var(--dim); }
+  .pill { font-size: 11px; color: var(--dim); }
+  .spacer { flex: 1; }
+  @media (max-width: 700px) {
+    main { flex-direction: column; }
+    section + section { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kotlin → WebAssembly, compiled in the browser</h1>
+  <select id="examples" title="Load an example" aria-label="Load an example"></select>
+  <button id="run" disabled>Run <kbd>Ctrl+Enter</kbd></button>
+  <span id="status">starting…</span>
+  <span class="spacer"></span>
+  <span class="pill">minikotlin subset · no server · WasmGC</span>
+</header>
+
+<main>
+  <section>
+    <h2>Kotlin source</h2>
+    <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off"
+              aria-label="Kotlin source"></textarea>
+  </section>
+  <section>
+    <h2>Output</h2>
+    <pre id="out">Press Run to compile and execute this program.</pre>
+    <pre id="diag" hidden></pre>
+  </section>
+</main>
+
+<script type="module">
+const EXAMPLES = [
+  ['Hello, values', `
+data class Point(val x: Int, val y: Int)
+
+fun main() {
+    println("hello from Kotlin in the browser")
+    val points = listOf(Point(1, 2), Point(3, 4))
+    points.forEach { p -> println("$p -> \${p.x + p.y}") }
+    for (i in 1..5) println("$i squared = \${i * i}")
+}
+`],
+  ['Classes & polymorphism', `
+open class Animal(val name: String) {
+    open fun sound(): String = "..."
+}
+
+class Dog(name: String) : Animal(name) {
+    override fun sound(): String = "Woof"
+}
+
+class Cat(name: String) : Animal(name) {
+    override fun sound(): String = "Meow"
+}
+
+fun main() {
+    val animals = listOf<Animal>(Animal("Generic"), Dog("Rex"), Cat("Milo"))
+    for (a in animals) println("\${a.name}: \${a.sound()}")
+}
+`],
+  ['Sealed shapes & when', `
+sealed class Shape
+class Circle(val r: Double) : Shape()
+class Rect(val w: Double, val h: Double) : Shape()
+
+fun area(s: Shape): Double = when (s) {
+    is Circle -> 3.14159 * s.r * s.r
+    is Rect -> s.w * s.h
+}
+
+fun main() {
+    val shapes: List<Shape> = listOf(Circle(2.0), Rect(3.0, 4.0))
+    for (s in shapes) {
+        val label = when (s) {
+            is Circle -> "circle r=\${s.r}"
+            is Rect -> "rect \${s.w}x\${s.h}"
+        }
+        println("$label -> area \${area(s)}")
+    }
+}
+`],
+  ['Collections', `
+fun main() {
+    val xs = listOf(5, 3, 9, 1, 7, 8)
+    println("xs       = $xs")
+    println("sorted   = \${xs.sorted()}")
+    println("evens    = \${xs.filter { it % 2 == 0 }}")
+    println("squares  = \${xs.map { it * it }}")
+    println("sum      = \${xs.sum()}")
+    println("max      = \${xs.max()}")
+}
+`],
+  ['Null safety', `
+fun parse(s: String): Int? = if (s == "") null else s.toIntOrNull()
+
+fun main() {
+    val values = listOf("42", "", "7")
+    for (v in values) {
+        val n = parse(v)
+        val shown = if (v == "") "<empty>" else v
+        println("$shown -> \${n?.let { it * 2 } ?: -1}")
+    }
+    val name: String? = null
+    println("name length = \${name?.length ?: 0}")
+}
+`],
+  ['Coroutines', `
+import kotlinx.coroutines.*
+
+fun main() = runBlocking {
+    println("start")
+    coroutineScope {
+        launch {
+            delay(300)
+            println("slow lane")
+        }
+        launch {
+            delay(100)
+            println("fast lane")
+        }
+    }
+    println("done")
+}
+`],
+  ['Diagnostics: unresolved name', `
+fun main() {
+    println(missingFunction(42))
+}
+`],
+];
+
+const $ = (id) => document.getElementById(id);
+const srcEl = $('src'), outEl = $('out'), diagEl = $('diag'),
+      statusEl = $('status'), runBtn = $('run'), examplesEl = $('examples');
+
+// A Kotlin program can loop forever. The compiler and the program share one
+// worker, so the only reliable way out is to terminate it and start a fresh one.
+const RUN_TIMEOUT_MS = 15000;
+
+let worker = null;
+let ready = false;
+let busy = false;
+let watchdog = 0;
+let startedAt = 0;
+
+function setStatus(text, state = '') {
+  statusEl.textContent = text;
+  statusEl.toggleAttribute('data-busy', state === 'busy');
+  statusEl.toggleAttribute('data-ok', state === 'ok');
+  statusEl.toggleAttribute('data-err', state === 'err');
+}
+
+function makeWorker() {
+  const w = new Worker('./runner.js', { type: 'module' });
+  w.onmessage = ({ data }) => onMessage(data);
+  w.onerror = (event) => {
+    busy = false;
+    ready = false;
+    runBtn.disabled = true;
+    setStatus('worker error: ' + (event.message || 'unknown'), 'err');
+    showDiagnostics(event.message || 'The worker failed to start.');
+  };
+  w.onmessageerror = () => {
+    busy = false;
+    ready = false;
+    runBtn.disabled = true;
+    setStatus('worker message error', 'err');
+  };
+  return w;
+}
+
+function start() {
+  ready = false;
+  runBtn.disabled = true;
+  setStatus('loading compiler (1.9 MB)…', 'busy');
+  worker.postMessage({ type: 'init' });
+}
+
+function onMessage(message) {
+  switch (message.type) {
+    case 'ready':
+      ready = true;
+      runBtn.disabled = false;
+      setStatus('ready · compiler v' + message.version, 'ok');
+      break;
+
+    case 'status':
+      if (message.stage === 'compiling') setStatus('compiling…', 'busy');
+      else if (message.stage === 'running') setStatus('running…', 'busy');
+      break;
+
+    case 'compiled':
+      setStatus('compiled ' + formatBytes(message.bytes) + ' · running…', 'busy');
+      break;
+
+    case 'output':
+      appendOutput(message.text);
+      break;
+
+    case 'result':
+      clearTimeout(watchdog);
+      busy = false;
+      runBtn.disabled = !ready;
+      renderResult(message, performance.now() - startedAt);
+      break;
+
+    case 'fatal':
+      clearTimeout(watchdog);
+      busy = false;
+      runBtn.disabled = !ready;
+      showDiagnostics(message.message);
+      setStatus('error', 'err');
+      break;
+  }
+}
+
+function formatBytes(n) {
+  return n < 1024 ? n + ' B' : (n / 1024).toFixed(1) + ' KB';
+}
+
+function formatMs(n) {
+  return (n < 10 ? n.toFixed(1) : Math.round(n)) + ' ms';
+}
+
+function appendOutput(text) {
+  outEl.textContent += text;
+  outEl.scrollTop = outEl.scrollHeight;
+}
+
+function showDiagnostics(text) {
+  const clean = (text || '').trim();
+  diagEl.textContent = clean;
+  diagEl.hidden = !clean;
+}
+
+function renderResult(result, totalMs) {
+  if (result.errors?.length) {
+    const lines = result.errors.map((e) => {
+      const where = e.line ? `${e.file || 'Main.kt'}:${e.line}:${e.col || 0}` : '';
+      return (where ? where + '  ' : '') + e.message;
+    });
+    showDiagnostics(lines.join('\n'));
+    setStatus(`compile error (${result.errors.length}) · ${formatMs(result.compileMs)}`, 'err');
+    return;
+  }
+
+  if (result.runtimeError) {
+    showDiagnostics('runtime error: ' + result.runtimeError);
+    setStatus('runtime error · ' + formatBytes(result.bytes), 'err');
+    return;
+  }
+
+  if (!result.hasMain) {
+    setStatus('compiled, but there is no fun main()', 'err');
+    return;
+  }
+
+  if (outEl.textContent.trim() === '') {
+    outEl.textContent = '(no output)';
+  }
+  showDiagnostics('');
+  setStatus(
+    `ok · compile ${formatMs(result.compileMs)} · run ${formatMs(result.runMs)} · ${formatBytes(result.bytes)}`,
+    'ok'
+  );
+}
+
+function run() {
+  if (!ready || busy) return;
+  busy = true;
+  runBtn.disabled = true;
+  outEl.textContent = '';
+  showDiagnostics('');
+  startedAt = performance.now();
+  setStatus('compiling…', 'busy');
+  worker.postMessage({ type: 'run', source: srcEl.value, filename: 'Main.kt' });
+
+  clearTimeout(watchdog);
+  watchdog = setTimeout(() => {
+    worker.terminate();
+    worker = makeWorker();
+    busy = false;
+    ready = false;
+    runBtn.disabled = true;
+    outEl.textContent = `(program did not finish within ${RUN_TIMEOUT_MS / 1000} s — stopped)`;
+    setStatus('timed out; restarting compiler…', 'err');
+    start();
+  }, RUN_TIMEOUT_MS);
+}
+
+for (const [label] of EXAMPLES) {
+  const option = document.createElement('option');
+  option.textContent = label;
+  examplesEl.appendChild(option);
+}
+
+function loadExample(index) {
+  srcEl.value = EXAMPLES[index][1].replace(/^\n/, '');
+  srcEl.focus();
+}
+
+examplesEl.addEventListener('change', () => loadExample(examplesEl.selectedIndex));
+examplesEl.selectedIndex = 0;
+loadExample(0);
+
+runBtn.addEventListener('click', run);
+addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    event.preventDefault();
+    run();
+  }
+});
+
+// Keep Tab in the editor (insert a real tab) instead of moving focus away.
+srcEl.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab') return;
+  event.preventDefault();
+  const { selectionStart: start, selectionEnd: end } = srcEl;
+  srcEl.setRangeText('\t', start, end, 'end');
+});
+
+worker = makeWorker();
+start();
+</script>
+</body>
+</html>

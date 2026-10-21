@@ -1,0 +1,11 @@
+{
+  "name": "browser-kotlin-poc",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Proof of concept: compile and run Kotlin entirely in the browser, no server.",
+  "type": "module",
+  "scripts": {
+    "serve": "node serve.mjs",
+    "test": "node test/smoke.mjs"
+  }
+}
