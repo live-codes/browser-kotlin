@@ -1,7 +1,7 @@
 # Kotlin in the browser — proof of concept
 
 Two independent demos that compile and run Kotlin **entirely in the browser**,
-with no server, no JVM and no build step:
+with no server and no build step:
 
 | Demo | Compiler | First load | Language |
 | --- | --- | ---: | --- |
@@ -27,6 +27,9 @@ block ES-module Workers and WebAssembly over `file://`; `serve.mjs` mainly adds
 ```sh
 npm test                # Node smoke test for the minikotlin demo
 ```
+
+Every asset is committed, so a clone runs both demos and the smoke test without
+a build step.
 
 ## Measured
 
@@ -79,7 +82,8 @@ vendor/minikotlin/          minikotlin.js + 1.9 MB wasm + engine runtimes
 The compiler is the **actual published Kotlin compiler**, ahead-of-time compiled
 to a GraalVM Web Image by
 [`alex28sh/wasm-code-editor`](https://github.com/alex28sh/wasm-code-editor)
-(`native-image --tool:svm-wasm`). The prebuilt image used here was published by
+(`native-image --tool:svm-wasm`). The image embeds a JVM runtime compiled to
+wasm; no JVM is installed. The prebuilt image used here was published by
 [`space-enthusiast/kotlin-on-web-playground`](https://github.com/space-enthusiast/kotlin-on-web-playground).
 
 `real.html` starts the classic worker `vendor/kotlin-web/kotlin-compiler-worker.js`.
