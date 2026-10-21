@@ -1,5 +1,7 @@
 # Kotlin in the browser — proof of concept
 
+Repository: <https://github.com/live-codes/browser-kotlin>
+
 Two independent demos that compile and run Kotlin **entirely in the browser**,
 with no server and no build step:
 

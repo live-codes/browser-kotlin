@@ -5,6 +5,8 @@ WebAssembly by GraalVM Web Image. Compilation and execution happen entirely in
 the browser (or in Node) — **no server compiles anything**, and nothing is sent
 anywhere.
 
+Source: <https://github.com/live-codes/browser-kotlin/tree/main/packages/kotlin-wasm>
+
 ```js
 import { createCompiler } from '@live-codes/kotlin-wasm';
 
