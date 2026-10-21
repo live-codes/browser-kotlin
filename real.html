@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kotlin in the browser — real K2 compiler</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --line: #8884;
+    --dim: #888;
+    --err: #d0334a;
+    --ok: #178a55;
+    --accent: #7c5cff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
+         font: 14px/1.5 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+           padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  #status { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #status[data-busy]::before { content: "◐ "; }
+  #status[data-ok] { color: var(--ok); }
+  #status[data-err] { color: var(--err); }
+  main { flex: 1; display: flex; min-height: 0; }
+  section { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  section + section { border-left: 1px solid var(--line); }
+  h2 { margin: 0; padding: 6px 12px; font-size: 11px; font-weight: 600;
+       letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+  textarea, pre { margin: 0; padding: 12px 12px 24px; border: 0; background: transparent;
+                  font: 13px/1.45 ui-monospace, Consolas, monospace; tab-size: 4;
+                  white-space: pre; overflow: auto; color: inherit; }
+  textarea { flex: 1; resize: none; outline: none; }
+  #out { flex: 1; white-space: pre-wrap; }
+  #diag { flex: 0 1 auto; max-height: 42%; color: var(--err); border-top: 1px solid var(--line); white-space: pre-wrap; }
+  [hidden] { display: none !important; }
+  select, button { font: 12px system-ui; padding: 4px 10px; }
+  button { font-weight: 600; }
+  kbd { font: 11px ui-monospace, monospace; color: var(--dim); }
+  .pill { font-size: 11px; color: var(--dim); }
+  .spacer { flex: 1; }
+  a { color: var(--accent); }
+  .banner { padding: 8px 16px; font-size: 12px; border-bottom: 1px solid var(--line);
+            background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--dim); }
+  @media (max-width: 700px) {
+    main { flex-direction: column; }
+    section + section { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kotlin → WebAssembly with the real K2 compiler</h1>
+  <select id="examples" title="Load an example" aria-label="Load an example"></select>
+  <button id="run" disabled>Run <kbd>Ctrl+Enter</kbd></button>
+  <span id="status">starting…</span>
+  <span class="spacer"></span>
+  <a href="./index.html">← minikotlin demo</a>
+</header>
+
+<div class="banner" id="banner">
+  First visit downloads the real Kotlin compiler as WebAssembly (~87 MB). It is cached
+  by the browser; nothing is sent to a server.
+</div>
+
+<main>
+  <section>
+    <h2>Kotlin source</h2>
+    <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off"
+              aria-label="Kotlin source"></textarea>
+  </section>
+  <section>
+    <h2>Output</h2>
+    <pre id="out">Press Run to compile and execute this program.</pre>
+    <pre id="diag" hidden></pre>
+  </section>
+</main>
+
+<script type="module">
+const COMPILER_VERSION = '2.5.0-dev-9169';
+
+const EXAMPLES = [
+  ['Hello, real Kotlin', `
+fun main() {
+    val name = "Kotlin"
+    println("Hello, $name! This was compiled by the real K2 compiler inside the browser.")
+    val squares = (1..5).map { it * it }
+    println("squares = $squares")
+}
+`],
+  ['Data class & collections', `
+data class Person(val name: String, val age: Int)
+
+fun main() {
+    val people = listOf(
+        Person("Alice", 29), Person("Bob", 31),
+        Person("Carol", 24), Person("Dave", 31),
+    )
+    println(people.groupBy { it.age })
+    println("oldest: " + people.maxBy { it.age })
+    println(people.sortedBy { it.name }.map { it.name.uppercase() })
+    println("average age: " + people.map { it.age }.average())
+}
+`],
+  ['Sealed classes & when', `
+import kotlin.math.PI
+
+sealed class Shape {
+    abstract fun area(): Double
+}
+
+data class Circle(val radius: Double) : Shape() {
+    override fun area() = PI * radius * radius
+}
+
+data class Rect(val width: Double, val height: Double) : Shape() {
+    override fun area() = width * height
+}
+
+fun describe(shape: Shape): String = when (shape) {
+    is Circle -> "circle r=\${shape.radius}"
+    is Rect -> "rect \${shape.width}x\${shape.height}"
+}
+
+fun main() {
+    val shapes: List<Shape> = listOf(Circle(2.0), Rect(3.0, 4.0))
+    for (shape in shapes) {
+        println("\${describe(shape)} -> area \${shape.area()}")
+    }
+}
+`],
+  ['Generics & stdlib', `
+class Pmf<T>(private val probs: Map<T, Double>) {
+    operator fun get(x: T): Double = probs[x] ?: 0.0
+
+    fun normalized(): Pmf<T> {
+        val total = probs.values.sum()
+        return Pmf(probs.mapValues { it.value / total })
+    }
+
+    operator fun times(likelihood: (T) -> Double) =
+        Pmf(probs.mapValues { (x, p) -> p * likelihood(x) })
+
+    fun mean(toDouble: (T) -> Double) =
+        probs.entries.sumOf { toDouble(it.key) * it.value }
+
+    override fun toString() =
+        probs.entries.joinToString("\\n") { "\${it.key}\\t\${it.value}" }
+}
+
+fun main() {
+    val hypotheses = (0..10).map { it / 10.0 }
+    val prior = Pmf(hypotheses.associateWith { 1.0 })
+    val posterior = (prior * { p -> p }).normalized()
+    println(posterior)
+    println("mean = \${posterior.mean { it }}")
+}
+`],
+  ['kotlin.math', `
+import kotlin.math.pow
+import kotlin.math.roundToInt
+
+fun choose(n: Int, k: Int): Long =
+    (1..k).fold(1L) { acc, i -> acc * (n - k + i) / i }
+
+fun binomPmf(k: Int, n: Int, p: Double): Double =
+    choose(n, k) * p.pow(k) * (1 - p).pow(n - k)
+
+fun main() {
+    val n = 10
+    val p = 0.5
+    for (k in 0..n) {
+        val prob = binomPmf(k, n, p)
+        val bar = "#".repeat((prob * 100).toInt())
+        val rounded = (prob * 10000).roundToInt() / 10000.0
+        println("k=\${k.toString().padStart(2)}  \${rounded.toString().padEnd(6)}  $bar")
+    }
+}
+`],
+  ['Diagnostics: type error', `
+fun main() {
+    val count: Int = "three"
+    println(count)
+    println(undefinedThing)
+}
+`],
+];
+
+const $ = (id) => document.getElementById(id);
+const srcEl = $('src'), outEl = $('out'), diagEl = $('diag'),
+      statusEl = $('status'), runBtn = $('run'), examplesEl = $('examples'),
+      bannerEl = $('banner');
+
+const RUN_TIMEOUT_MS = 15000;
+
+let compiler = null;
+let ready = false;
+let busy = false;
+let startedAt = 0;
+
+function setStatus(text, state = '') {
+  statusEl.textContent = text;
+  statusEl.toggleAttribute('data-busy', state === 'busy');
+  statusEl.toggleAttribute('data-ok', state === 'ok');
+  statusEl.toggleAttribute('data-err', state === 'err');
+}
+
+function formatBytes(n) {
+  return n < 1024 ? n + ' B' : (n / 1024).toFixed(1) + ' KB';
+}
+
+function formatMs(n) {
+  return (n < 10 ? n.toFixed(1) : Math.round(n)) + ' ms';
+}
+
+function appendOutput(text) {
+  outEl.textContent += text + '\n';
+  outEl.scrollTop = outEl.scrollHeight;
+}
+
+function showDiagnostics(text) {
+  const clean = (text || '').trim();
+  diagEl.textContent = clean;
+  diagEl.hidden = !clean;
+}
+
+// The compiler worker is a classic GraalVM Web Image worker. It publishes
+// `kotlinCompilerHost` and answers {id, operation, text, argument}.
+function createCompiler() {
+  const worker = new Worker('./vendor/kotlin-web/kotlin-compiler-worker.js');
+  let nextId = 1;
+  const pending = new Map();
+  let failure = null;
+
+  worker.onmessage = ({ data }) => {
+    const resolve = pending.get(data.id);
+    if (!resolve) return;
+    pending.delete(data.id);
+    let answer;
+    try {
+      answer = JSON.parse(data.answer);
+    } catch (err) {
+      answer = { error: 'bad answer from compiler: ' + err.message };
+    }
+    resolve(answer);
+  };
+  worker.onerror = (event) => {
+    failure = event.message || 'the compiler worker failed to start';
+    for (const resolve of pending.values()) resolve({ error: failure });
+    pending.clear();
+  };
+
+  return {
+    request(operation, text, argument = '') {
+      if (failure) return Promise.resolve({ error: failure });
+      return new Promise((resolve) => {
+        const id = nextId++;
+        pending.set(id, resolve);
+        worker.postMessage({ id, operation, text, argument });
+      });
+    },
+  };
+}
+
+// Compile returns four files. main.mjs imports the others by relative path and
+// resolves main.wasm against import.meta.url; rewrite those to blob URLs, then
+// import main.mjs in its own module worker.
+function runProgram(files, onOutput, timeoutMs = RUN_TIMEOUT_MS) {
+  const file = (name) => {
+    const found = files.find((f) => f.name === name);
+    if (!found) throw new Error('compiler did not emit ' + name);
+    return found.content;
+  };
+  const bytes = (name) => Uint8Array.from(atob(file(name)), (c) => c.charCodeAt(0));
+  const text = (name) => new TextDecoder().decode(bytes(name));
+  const urls = [];
+  const blob = (content, type) => {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    urls.push(url);
+    return url;
+  };
+
+  const wasm = blob(bytes('main.wasm'), 'application/wasm');
+  const builtins = blob(text('main.js-builtins.mjs'), 'text/javascript');
+  const imports = blob(
+    text('main.import-object.mjs').replaceAll("'./main.js-builtins.mjs'", `'${builtins}'`),
+    'text/javascript'
+  );
+  const main = blob(
+    text('main.mjs')
+      .replaceAll("'./main.import-object.mjs'", `'${imports}'`)
+      .replaceAll("new URL('./main.wasm',import.meta.url).href", `'${wasm}'`),
+    'text/javascript'
+  );
+  const runner = blob(`
+    for (const level of ['log', 'info', 'warn', 'error', 'debug'])
+      console[level] = (...values) => postMessage({ output: values.map(String).join(' '), level });
+    try { await import(${JSON.stringify(main)}); postMessage({ done: true }); }
+    catch (error) { postMessage({ done: true, error: String(error && error.stack || error) }); }
+  `, 'text/javascript');
+
+  return new Promise((resolve) => {
+    const worker = new Worker(runner, { type: 'module' });
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker.terminate();
+      urls.forEach(URL.revokeObjectURL);
+      resolve(error);
+    };
+    const timer = setTimeout(() => finish(`program did not finish within ${timeoutMs / 1000} s — stopped`), timeoutMs);
+    worker.onmessage = ({ data }) => {
+      if (data.done) finish(data.error || null);
+      else onOutput(data.output, data.level);
+    };
+    worker.onerror = (event) => finish(event.message || 'the program worker failed to start');
+  });
+}
+
+function lineCol(source, offset) {
+  const before = source.slice(0, Math.max(0, offset));
+  const lines = before.split('\n');
+  return { line: lines.length, col: lines[lines.length - 1].length + 1 };
+}
+
+function wasmSize(files) {
+  const file = files.find((f) => f.name === 'main.wasm');
+  if (!file) return 0;
+  const base64 = file.content;
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  return Math.floor(base64.length * 3 / 4) - padding;
+}
+
+async function warmUp() {
+  setStatus('loading real K2 compiler (~87 MB, first visit only)…', 'busy');
+  const result = await compiler.request('compile', 'fun main() {}');
+  if (result.error) {
+    setStatus('compiler failed to load', 'err');
+    showDiagnostics(result.error);
+    return;
+  }
+  ready = true;
+  runBtn.disabled = false;
+  bannerEl.hidden = true;
+  setStatus('ready · real K2 compiler ' + COMPILER_VERSION, 'ok');
+}
+
+async function run() {
+  if (!ready || busy) return;
+  busy = true;
+  runBtn.disabled = true;
+  outEl.textContent = '';
+  showDiagnostics('');
+  startedAt = performance.now();
+  setStatus('compiling…', 'busy');
+
+  try {
+    const result = await compiler.request('compile', srcEl.value);
+    if (result.error) throw new Error(result.error);
+
+    const diagnostics = result.diagnostics || [];
+    if (diagnostics.length) {
+      const lines = diagnostics.map((d) => {
+        const { line, col } = lineCol(srcEl.value, d.from);
+        return `${line}:${col}  ${d.severity === 'ERROR' ? 'error' : 'warning'}: ${d.message}`;
+      });
+      showDiagnostics(lines.join('\n'));
+    }
+
+    if (!result.ok) {
+      setStatus(`compile failed · ${formatMs(result.milliseconds)}`, 'err');
+      return;
+    }
+
+    setStatus('running…', 'busy');
+    const runStart = performance.now();
+    const error = await runProgram(result.files, (line, level) => {
+      appendOutput(line);
+      if (level === 'error') showDiagnostics(line);
+    });
+    if (error) {
+      showDiagnostics(error);
+      setStatus('runtime error', 'err');
+      return;
+    }
+
+    const size = wasmSize(result.files);
+    const runMs = performance.now() - runStart;
+    if (outEl.textContent.trim() === '') outEl.textContent = '(no output)';
+    setStatus(
+      `ok · compile ${formatMs(result.milliseconds)} · run ${formatMs(runMs)} · ${formatBytes(size)} wasm`,
+      'ok'
+    );
+  } catch (error) {
+    showDiagnostics(error?.message || String(error));
+    setStatus('failed', 'err');
+  } finally {
+    busy = false;
+    runBtn.disabled = !ready;
+  }
+}
+
+for (const [label] of EXAMPLES) {
+  const option = document.createElement('option');
+  option.textContent = label;
+  examplesEl.appendChild(option);
+}
+
+function loadExample(index) {
+  srcEl.value = EXAMPLES[index][1].replace(/^\n/, '');
+  srcEl.focus();
+}
+
+examplesEl.addEventListener('change', () => loadExample(examplesEl.selectedIndex));
+examplesEl.selectedIndex = 0;
+loadExample(0);
+
+runBtn.addEventListener('click', run);
+addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    event.preventDefault();
+    run();
+  }
+});
+
+srcEl.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab') return;
+  event.preventDefault();
+  const { selectionStart: start, selectionEnd: end } = srcEl;
+  srcEl.setRangeText('\t', start, end, 'end');
+});
+
+compiler = createCompiler();
+warmUp();
+</script>
+</body>
+</html>

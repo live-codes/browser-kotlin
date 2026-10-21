@@ -33,12 +33,13 @@
                   white-space: pre; overflow: auto; color: inherit; }
   textarea { flex: 1; resize: none; outline: none; }
   #src { flex: 1; }
-  #out { flex: 1; }
-  #diag { flex: 0 1 auto; max-height: 42%; color: var(--err); border-top: 1px solid var(--line); }
+  #out { flex: 1; white-space: pre-wrap; }
+  #diag { flex: 0 1 auto; max-height: 42%; color: var(--err); border-top: 1px solid var(--line); white-space: pre-wrap; }
   [hidden] { display: none !important; }
   select, button { font: 12px system-ui; padding: 4px 10px; }
   button { font-weight: 600; }
   kbd { font: 11px ui-monospace, monospace; color: var(--dim); }
+  a { color: var(--accent); }
   .pill { font-size: 11px; color: var(--dim); }
   .spacer { flex: 1; }
   @media (max-width: 700px) {
@@ -54,6 +55,7 @@
   <button id="run" disabled>Run <kbd>Ctrl+Enter</kbd></button>
   <span id="status">starting…</span>
   <span class="spacer"></span>
+  <a href="./real.html">real K2 compiler →</a>
   <span class="pill">minikotlin subset · no server · WasmGC</span>
 </header>
 

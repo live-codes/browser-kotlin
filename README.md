@@ -1,11 +1,15 @@
 # Kotlin in the browser — proof of concept
 
-Running Kotlin in LiveCodes with **no server**: the compiler is itself
-WebAssembly, so `.kt` source is lexed, parsed, semantically analysed, lowered to
-HIR/MIR and emitted as **WasmGC bytecode entirely in the browser tab** — then
-instantiated and run on the same page. Nothing is sent anywhere.
+Two independent demos that compile and run Kotlin **entirely in the browser**,
+with no server, no JVM and no build step:
 
-Status: working. Verified in headless Chrome (see [Verified](#verified)).
+| Demo | Compiler | First load | Language |
+| --- | --- | ---: | --- |
+| [`index.html`](index.html) | [minikotlin](https://minikotlin.run) 0.1.0 — from-scratch C→Wasm compiler | ~2 MB | a tested Kotlin subset |
+| [`real.html`](real.html) | **real Kotlin 2.5.0-dev-9169 (K2)** via GraalVM Web Image | ~87 MB | real Kotlin + stdlib |
+
+Both emit **WasmGC**, instantiate it on the page, and stream `println` output.
+Nothing is sent anywhere.
 
 ## Run it
 
@@ -13,141 +17,130 @@ Status: working. Verified in headless Chrome (see [Verified](#verified)).
 node serve.mjs          # http://localhost:8001/
 ```
 
-Open <http://localhost:8001/> and press **Run** (or Ctrl/Cmd+Enter).
+- <http://localhost:8001/> — minikotlin demo (tiny, fast)
+- <http://localhost:8001/real.html> — real K2 compiler demo (large first load)
 
-A static server is required (ES-module Workers and WebAssembly are blocked over
-`file://`), but nothing is compiled server-side. `serve.mjs` exists mainly to
-send `Content-Type: application/wasm` for `.wasm` files.
+Press **Run** (or Ctrl/Cmd+Enter). A static server is required because browsers
+block ES-module Workers and WebAssembly over `file://`; `serve.mjs` mainly adds
+`Content-Type: application/wasm`. Nothing is compiled server-side.
 
 ```sh
-npm test                # Node smoke test: compile + execute + diagnostics
+npm test                # Node smoke test for the minikotlin demo
 ```
 
-## What this proves
+## Measured
 
-- **Real client-side compile and run.** No JVM, no LLVM, no Binaryen, no
-  Gradle, no network round-trip. The 1.9 MB compiler is loaded once, then each
-  Run is a synchronous compile (tens of milliseconds) followed by instantiation.
-- **Kotlin features that work here:** data classes, inheritance and `override`,
-  sealed classes with exhaustive `when` + smart casts, null safety (`?.`, `?:`,
-  `!!`), generics, collections (`sorted`/`filter`/`map`/`sum`/`max`), string
-  templates, top-level functions, and coroutines
-  (`runBlocking`/`launch`/`delay`/`coroutineScope`).
-- **Diagnostics** come back with message and line/column, so inline editor
-  markers are feasible.
-- **Output streams**: `println` arrives in the panel as it is produced.
-- **A runaway program is recoverable**: compilation and execution happen in a
-  Worker, which is terminated and replaced after a 15-second watchdog.
-
-## Verified
-
-Headless Chrome, served locally over HTTP.
+### minikotlin (`index.html`)
 
 | Program | Result |
 | --- | --- |
-| Hello, values (data class, templates, loop) | correct output, ~11 KB wasm |
-| Classes & polymorphism (`open`/`override`) | correct output |
-| Sealed shapes & `when` | correct output |
-| Collections (`sorted`/`filter`/`map`/`sum`/`max`) | correct output |
-| Null safety (`toIntOrNull`, `?.let`, `?:`) | correct output |
+| Hello, values (data class, templates, loop) | correct, ~11 KB wasm |
+| Classes & polymorphism (`open`/`override`) | correct |
+| Sealed shapes & `when` | correct |
+| Collections (`sorted`/`filter`/`map`/`sum`/`max`) | correct |
+| Null safety (`toIntOrNull`, `?.let`, `?:`) | correct |
 | Coroutines (two `launch` + `delay`) | `start / fast lane / slow lane / done` |
 | Unresolved name | diagnostics listing the unresolved identifier |
 | Infinite loop | stopped at 15 s, worker replaced, next run works |
 
-Compile times observed: ~5–20 ms warm, first run includes compiler/runtime load.
+Compile ~5–20 ms warm; the first run includes the 1.9 MB compiler load.
+
+### Real K2 (`real.html`)
+
+| Program | Result |
+| --- | --- |
+| Hello + `map` + string templates | correct, 64.2 KB wasm, ~1.2–3.8 s compile, ~25–40 ms run |
+| Data class + `groupBy` / `maxBy` / `sortedBy` / `average` | correct |
+| Sealed classes + `when` + `kotlin.math.PI` | correct |
+| Generics + `associateWith` / `mapValues` / `sumOf` / `joinToString` | correct, 149.6 KB wasm |
+| `kotlin.math` (`pow`, `roundToInt`, `fold`) | correct |
+| Type error + unresolved reference | `2:20 error: Initializer type mismatch…`, `4:13 error: Unresolved reference…` |
+| Infinite loop | stopped at 15 s; the compiler worker survives and the next run works |
+
+First compile after load: ~3.8 s. Later compiles: ~1.2–1.9 s. Run: 20–40 ms.
 
 ## How it works
 
-The compiler is [minikotlin](https://minikotlin.run) v0.1.0 — a from-scratch
-Kotlin-to-WasmGC compiler written in C and built to WebAssembly with Emscripten.
-It emits WebAssembly GC bytecode by hand, so the same tab that compiles also
-instantiates the result.
+### 1. minikotlin
+
+[minikotlin](https://minikotlin.run) is a Kotlin→WasmGC compiler written from
+scratch in C and compiled to WebAssembly with Emscripten. `index.html` loads it
+inside a module Worker, compiles the source, then instantiates the emitted
+module with the host imports in `vendor/minikotlin/engine/`.
 
 ```
 index.html                  editor, examples, Run, output, watchdog
 runner.js                   module Worker: load compiler → compile → instantiate → run
-serve.mjs                   static server (adds Content-Type: application/wasm)
-vendor/minikotlin/
-  minikotlin.js             Emscripten loader (classic script, loaded as a blob module)
-  minikotlin.wasm           the compiler itself (1.9 MB)
-  engine/
-    compile-bridge.js       upstream bridge (reference; not used directly here)
-    host-imports.mjs        every env.__* import a generated module expects
-    js-runtime.mjs          JS interop implementation used by host-imports
-    math-runtime.mjs        kotlin.math runtime bridge
-    char-runtime.mjs        Char classification runtime bridge
-    kotlin_math_rt.wasm     musl libm for kotlin.math
-    kotlin_char_rt.wasm     UCD table for Char classification
-test/smoke.mjs              Node compile-and-run smoke test
+vendor/minikotlin/          minikotlin.js + 1.9 MB wasm + engine runtimes
 ```
 
-### Worker sequence
+### 2. Real K2
 
-```
-new Worker('./runner.js', { type: 'module' })
-  ↓ init
-fetch minikotlin.js → append `export default createMinikotlin` → import(blob URL)
-  ↓
-createMinikotlin({ locateFile }) → mkc_compile_buffer / mkc_error_* / mkc_version
-  ↓ run
-mkc_compile_buffer(source, filename) → wasm bytes + diagnostics
-  ↓
-fetch kotlin_math_rt.wasm + kotlin_char_rt.wasm → makeHostEnv + imports
-  ↓
-WebAssembly.instantiate(wasm, { env }) → __mk_init() → main()
-  ↓
-stdout via env.__println/__print → postMessage to the page
+The compiler is the **actual published Kotlin compiler**, ahead-of-time compiled
+to a GraalVM Web Image by
+[`alex28sh/wasm-code-editor`](https://github.com/alex28sh/wasm-code-editor)
+(`native-image --tool:svm-wasm`). The prebuilt image used here was published by
+[`space-enthusiast/kotlin-on-web-playground`](https://github.com/space-enthusiast/kotlin-on-web-playground).
+
+`real.html` starts the classic worker `vendor/kotlin-web/kotlin-compiler-worker.js`.
+The worker loads its own `.wasm` and the 12 MB stdlib archive next to itself,
+then answers messages:
+
+```js
+worker.postMessage({ id, operation: 'compile', text: source, argument: '' });
+// -> answer JSON: { ok, milliseconds, diagnostics, files }
 ```
 
-The compiler is loaded through a Blob module because it is an Emscripten classic
-script that assigns a global (`createMinikotlin`); a Worker has no `<script>`.
-The vendored files stay untouched.
+`compile` returns `main.wasm`, `main.mjs`, `main.import-object.mjs` and
+`main.js-builtins.mjs`. `real.html` rewrites the generated imports to Blob URLs
+and imports `main.mjs` in a separate module Worker, overriding `console.*` so
+Kotlin/Wasm's `println` is streamed to the output panel. The program worker is
+terminated after 15 s; the compiler stays warm.
+
+Only the compiler image is vendored — the 75 MB **Analysis API** image (used
+upstream for completion and inline diagnostics) is deliberately omitted. This
+demo shows compiler diagnostics, not an IDE.
+
+See [`vendor/kotlin-web/README.md`](vendor/kotlin-web/README.md) for provenance
+and checksums.
 
 ## Caveats for LiveCodes
 
-Things to resolve before this becomes a language, roughly in order of weight:
+There are now two very different possible products:
 
-1. **It is a subset, not Kotlin.** minikotlin is a reimplementation, not the
-   official Kotlin compiler. It covers the language features above, but expects
-   neither the full standard library nor JVM interop, Gradle, annotations
-   processing or the wider ecosystem. A LiveCodes integration should either
-   label it clearly (e.g. “Kotlin (minikotlin subset)”) or use the real
-   compiler:
-   - Official Kotlin/Wasm in the browser: [`alex28sh/wasm-code-editor`](https://github.com/alex28sh/wasm-code-editor)
-     runs the real K2 compiler + Analysis API as WebAssembly, but the browser
-     payload is ~75 MB compiler + ~75 MB Analysis API + ~12 MB stdlib, and it
-     also targets Kotlin/Wasm.
-   - TeaVM back end is ready for Kotlin class files (8/8 fixtures in
-     `../browser-jvm/FINDINGS.md`), but no browser compiler emits JVM class
-     files today. Doppio is not viable (7–20 minute compiles).
-2. **Licence is unconfirmed.** No licence is published on `minikotlin.run` (as
-   of 2026-10-21). The assets are vendored here for evaluation only; do not
-   redistribute until the upstream licence is confirmed. See
-   [`vendor/minikotlin/README.md`](vendor/minikotlin/README.md).
-3. **No stdin.** The host runtime has file/stream imports, but this page does
-   not plumb a stdin panel. `readLine()` is not available.
-4. **Single file.** The compiler takes one source string. The upstream Studio
-   concatenates multiple `.kt` files (hoisting imports, entry file last); this
-   PoC does not expose that yet.
-5. **No multi-file/project model, no diagnostics-to-editor mapping.** Errors
-   are rendered in a panel, not as editor markers. Some diagnostics (unresolved
-   names) report line/column 0,0.
-6. **WasmGC is required** — Chrome/Edge 119+, Firefox 120+, Safari 18.2+. The
-   page does not feature-detect this yet; a missing WasmGC support shows up as
-   an instantiation error.
-7. **Output is not cancellable on the main thread** — hence the Worker. The
-   15-second watchdog also caps legitimate long-running coroutines.
-8. **Payload** is ~1.9 MB compiler + ~105 KB runtimes, cached by the browser.
-   Lazy-load it only when a snippet actually uses Kotlin, as the other wasm
-   languages do.
+1. **Real K2** is the credible Kotlin language path: actual Kotlin and stdlib,
+   proper diagnostics, ~87 MB first load. Compile is ~1–2 s, which is usable for
+   a Run button but not for per-keystroke analysis. The Analysis API can be
+   added for completion/lint at the cost of another ~75 MB.
+2. **minikotlin** is a ~2 MB fallback: instant load, tens-of-ms compiles, but a
+   subset language and an unconfirmed licence.
+
+Open items:
+
+- **Licensing is unconfirmed for both vendored toolchains.** minikotlin
+  publishes no licence; the real-K2 image comes from a repo with no licence and
+  embeds GraalVM runtime code (Oracle GraalVM terms). Both are vendored for
+  evaluation only — clear the terms before shipping.
+- **The real compiler is single-file, stdlib-only.** No other libraries, no
+  stdin, no multi-file projects, no Gradle. The upstream Analysis API is not
+  included here.
+- **Payload.** 87 MB for the real compiler (74.8 MB image + 12 MB stdlib),
+  cached by the browser. LiveCodes should lazy-load it only when a snippet uses
+  Kotlin.
+- **WasmGC is required** — Chrome/Edge 119+, Firefox 120+, Safari 18.2+. No
+  feature detection yet; unsupported browsers fail at instantiation.
+- **Timeouts.** A program is stopped after 15 s in both demos.
+- **Reproducing the real image needs Oracle GraalVM 25.1+ Web Image and ~10 GB
+  free RAM per image** (the upstream build was given 24–28 GB heap). That is why
+  these images are vendored rather than built here.
 
 ## Alternatives considered
 
 | Route | Verdict |
 | --- | --- |
-| minikotlin (this PoC) | Works today, tiny, subset language |
-| Official K2 compiled to Wasm (`wasm-code-editor`) | Real Kotlin, ~162 MB browser payload, needs a GraalVM build to reproduce |
-| TeaVM + Kotlin class files | Back end proven (8/8), but no browser class-file front end exists |
+| Real K2 via GraalVM Web Image (this demo) | Genuine Kotlin, works; 87 MB payload, licensing to clear |
+| minikotlin (this demo) | Works, tiny; subset language |
+| TeaVM + Kotlin class files | Back end proven (8/8 in `../browser-jvm/FINDINGS.md`), but no browser class-file front end exists |
 | Doppio JVM in JS | Compiles took 7–20 minutes; abandoned by `@live-codes/java-wasm` |
 
 The `browser-jvm` findings are the authority on the TeaVM route; the `java` and
