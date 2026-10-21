@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Run Kotlin with one API, on the real K2 compiler compiled to WebAssembly",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/live-codes/browser-kotlin.git",
@@ -32,7 +32,6 @@
     "dist",
     "assets",
     "toolchain.lock.json",
-    "NOTICE",
     "THIRD-PARTY-NOTICES.md"
   ],
   "engines": {

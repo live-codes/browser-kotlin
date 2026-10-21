@@ -46,9 +46,9 @@ the real K2 compiler behind a `createCompiler({ baseUrl })` API, in the
 shape of [`@live-codes/clang-wasm`](https://github.com/live-codes/clang-wasm).
 It has ESM and Node entries, an IIFE build for classic workers, a
 `kotlin-wasm-copy-assets` CLI, asset receipts and tests. `real.html` uses the
-same assets and worker wrapper. The package's own code is **Apache-2.0**,
-matching the Kotlin compiler; see its `LICENSE`, `NOTICE` and
-`THIRD-PARTY-NOTICES.md`.
+same assets and worker wrapper. The package's own code is **MIT**, following
+the other LiveCodes wasm packages; the vendored assets keep their own terms
+(see `LICENSE` and `THIRD-PARTY-NOTICES.md`).
 
 ## Measured
 
@@ -145,11 +145,11 @@ There are now two very different possible products:
 
 Open items:
 
-- **The package's own code is Apache-2.0, matching Kotlin; the vendored assets
-  are not cleared.** minikotlin publishes no licence; the real-K2 image comes
-  from a repo with no licence and embeds GraalVM runtime code (Oracle GraalVM
-  terms). Both are vendored for evaluation only — clear the asset terms before
-  shipping.
+- **The package's own code is MIT, like the other LiveCodes wasm packages; the
+  vendored assets are not cleared.** minikotlin publishes no licence; the
+  real-K2 image comes from a repo with no licence and embeds GraalVM runtime
+  code (Oracle GraalVM terms). Both are vendored for evaluation only — clear the
+  asset terms before shipping.
 - **The real compiler is single-file, stdlib-only.** No other libraries, no
   multi-file projects, no Gradle. The npm package supports pre-supplied
   line-based stdin (`readln`/`readlnOrNull`/`readLine`); the demo page does not

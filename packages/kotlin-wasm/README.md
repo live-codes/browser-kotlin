@@ -247,8 +247,8 @@ Program runs are tens of milliseconds.
 `2.5.0-dev-9169`, the compiler host
 `alex28sh/wasm-code-editor@02a8916`, the prebuilt image
 `space-enthusiast/kotlin-on-web-playground@5e5a40d`, the SHA-256 of every
-gzipped part and inflated archive, and the Apache license text. `npm run assets`
-fails if the assets and the lock disagree.
+gzipped part and inflated archive. `npm run assets` fails if the assets and the
+lock disagree.
 
 ## Development
 
@@ -269,9 +269,9 @@ before copying, so a stale pairing fails there rather than on someone's page.
 
 ## Licence
 
-Apache-2.0 for this package's own code, matching the Kotlin compiler. The
+MIT for this package's own code, like the other LiveCodes wasm packages. The
 assets are third-party builds: the Kotlin compiler and Kotlin/Wasm standard
 library are Apache-2.0, and the GraalVM Web Image runtime carries Oracle
-GraalVM terms. See [`LICENSE`](LICENSE), [`NOTICE`](NOTICE) and
+GraalVM terms. See [`LICENSE`](LICENSE) and
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) for attribution, provenance
 and the redistribution caveat.

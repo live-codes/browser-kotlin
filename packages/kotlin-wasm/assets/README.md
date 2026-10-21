@@ -96,7 +96,7 @@ by the package's browser engine.
 ## Licensing
 
 This package's own code — including the decompression wrapper and the manifest
-— is **Apache-2.0**; see [`../LICENSE`](../LICENSE) and [`../NOTICE`](../NOTICE).
+— is **MIT**; see [`../LICENSE`](../LICENSE).
 
 **The compiler assets are unconfirmed for redistribution.** The Kotlin compiler
 itself is Apache-2.0; the GraalVM Web Image runtime embedded in the generated

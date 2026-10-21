@@ -51,12 +51,5 @@
     "file": "kotlin-assets.json",
     "bytes": 467,
     "sha256": "9b106ed2490ab2e2c1d6e3fb9013115b7b18d43a8d1ff961ee1eca1ce4a9308e"
-  },
-  "licenseText": {
-    "file": "LICENSE",
-    "source": "https://github.com/JetBrains/kotlin/blob/master/license/LICENSE.txt",
-    "fetched": "2026-10-21",
-    "bytes": 11358,
-    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
   }
 }

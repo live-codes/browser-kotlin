@@ -18,9 +18,9 @@ await build({
   target: 'es2022',
   legalComments: 'external',
   banner: {
-    js: `/*! @live-codes/kotlin-wasm - Apache-2.0. IIFE build, sets self.kotlinWasm.
+    js: `/*! @live-codes/kotlin-wasm - MIT. IIFE build, sets self.kotlinWasm.
  *  importScripts('kotlin-wasm.global.js') then self.kotlinWasm.createCompiler({ baseUrl }).
- *  The real Kotlin K2 compiler built as a GraalVM Web Image; see NOTICE and THIRD-PARTY-NOTICES.md. */`
+ *  The real Kotlin K2 compiler built as a GraalVM Web Image; see THIRD-PARTY-NOTICES.md. */`
   }
 });
 
