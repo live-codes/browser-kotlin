@@ -1,7 +1,7 @@
 {
   "name": "@live-codes/kotlin-wasm",
   "version": "0.1.0",
-  "description": "Run Kotlin with one API, on the real K2 compiler compiled to WebAssembly",
+  "description": "Run Kotlin with one API, on the real K2 compiler compiled to WebAssembly, with Wasm and JS targets",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -46,7 +46,9 @@
     "toolchain:check": "node scripts/toolchain.mjs check",
     "toolchain:fetch": "bash scripts/fetch-toolchain.sh",
     "toolchain:build": "bash scripts/build-toolchain.sh",
+    "toolchain:build:js": "TARGET=js bash scripts/build-toolchain.sh",
     "toolchain:vendor": "node scripts/toolchain.mjs vendor",
+    "toolchain:vendor:js": "node scripts/toolchain.mjs vendor --target js",
     "toolchain:plan": "node scripts/toolchain.mjs plan",
     "test": "node --experimental-wasm-exnref --test \"test/*.test.js\"",
     "prepack": "npm run build:iife",
@@ -58,6 +60,7 @@
   "keywords": [
     "kotlin",
     "kotlin-wasm",
+    "kotlin-js",
     "k2",
     "wasm",
     "webassembly",

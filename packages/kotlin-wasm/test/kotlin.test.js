@@ -25,8 +25,10 @@ test('there is one language and the compiler is the pinned K2 build', () => {
   assert.deepEqual(compiler.capabilities, {
     language: 'kotlin',
     compiler: '2.5.0-dev-9169',
+    target: 'wasm',
     stdin: true,
     wasmGc: true,
+    programWasmGc: true,
     analysis: false
   });
 });

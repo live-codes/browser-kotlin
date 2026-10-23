@@ -5,7 +5,7 @@ Upstream toolchain: [`alex28sh/wasm-code-editor`](https://github.com/alex28sh/wa
 turned into a WebAssembly image with **Oracle GraalVM Web Image**
 (`native-image --tool:svm-wasm`).
 
-The committed image is built from that source tree with
+The committed images are built from that source tree with
 [`../scripts/build-toolchain.sh`](../scripts/build-toolchain.sh); see
 [`../TOOLCHAIN.md`](../TOOLCHAIN.md). Kotlin version: **2.5.0-dev-9169**.
 
@@ -26,6 +26,46 @@ are in [`../toolchain.lock.json`](../toolchain.lock.json).
 Total: **32,416,928 B (30.9 MiB)** gzipped, **84,607,404 B (80.7 MiB)**
 inflated. The compiler image is split so every file is under 20 MB; jsDelivr
 refuses files over that. The Analysis API image is deliberately not vendored.
+
+## JS target
+
+`assets/js/` is the same asset layout for the Kotlin/JS backend. This is a
+second GraalVM image; the program it emits is a standalone `main.mjs`, but the
+compiler image still runs as WebAssembly.
+
+| File | Size | What it is |
+| --- | ---: | --- |
+| `kotlin-compiler-worker.js` | 4,020 B | the same wrapper |
+| `kotlin-compiler-image.js` | 97,505 B | source-built JS-target generated worker + glue |
+| `kotlin-compiler-worker.js.wasm.gz.0` | 14,661,265 B | first half of the gzipped JS compiler image |
+| `kotlin-compiler-worker.js.wasm.gz.1` | 14,661,264 B | second half |
+| `kotlin-stdlib-js.bin.gz` | 3,304,275 B | gzipped Kotlin/JS stdlib archive |
+| `kotlin-assets.json` | 462 B | parts, sizes and inflated SHA-256 |
+
+Total: **32,728,791 B (31.2 MiB)** gzipped, **85,492,694 B (81.5 MiB)**
+inflated.
+
+SHA-256 (shipped, compressed):
+
+```
+8dfc994ac40c8f2fe29e701c16fb4731f0636c69cdaa72643148a4a4732336ff         462  js/kotlin-assets.json
+2e6211e8417a2353c3abcfa2bf8de6d91baa0097cf7c45b63d30366e998eb9da       97505  js/kotlin-compiler-image.js
+29f173371e2b538303917f82f45122a1db7243b3874ee3d19039e7ed7dd4bc71        4020  js/kotlin-compiler-worker.js
+c1f8bc7399c7d6bb1515721a7ac7fbd820d6e35d3d9022185213954f6acf2a36    14661265  js/kotlin-compiler-worker.js.wasm.gz.0
+a69bd4939a7ca5c519d1e3cadce07d2127a251246567f8aae773ad74b7bbae86    14661264  js/kotlin-compiler-worker.js.wasm.gz.1
+e24bdc0de4da8571fa3ae7521733b1bf123facfea8732355acce98937cba765e     3304275  js/kotlin-stdlib-js.bin.gz
+```
+
+Inflated bytes:
+
+```
+1b07b557851009dfef305c8797e1e5ea53f6f2dd5b9f89f6e24eb958a313f60e  74,999,356  JS compiler image
+ca8fdeef1f5707f605bd52878e79cc6705fa3bb811d08052a66d46902aa38083  10,493,338  Kotlin/JS stdlib archive
+```
+
+The JS target's own code and wrapper are Apache-2.0. The Kotlin/JS stdlib is
+Apache-2.0; the compiler image embeds GraalVM runtime code under the GFTC, with
+the same [`../licenses/`](../licenses/) notice as the Wasm image.
 
 ## How the compressed worker works
 
@@ -98,11 +138,11 @@ This package's own code — including the decompression wrapper and the manifest
 [`../LICENSE`](../LICENSE).
 
 **The compiler assets are unconfirmed for redistribution.** The Kotlin compiler
-itself is Apache-2.0; the GraalVM Web Image runtime embedded in the generated
-`.wasm` is governed by Oracle GraalVM terms (the committed build used Oracle
-GraalVM 25.0.4, under Oracle's GraalVM Free Terms and Conditions). Building the
-image here improves provenance but does not change those terms. The GFTC and
-Oracle's distribution notices are reproduced in
+and both stdlibs are Apache-2.0; the GraalVM Web Image runtime embedded in the
+generated `.wasm` files is governed by Oracle GraalVM terms (the committed builds
+used Oracle GraalVM 25.0.4, under the GraalVM Free Terms and Conditions).
+Building the images here improves provenance but does not change those terms. The
+GFTC and Oracle's distribution notices are reproduced in
 [`../licenses/`](../licenses/); see [`../NOTICE`](../NOTICE) and
 [`../THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md). Review Oracle's terms
-before redistributing the image.
+before redistributing the images.

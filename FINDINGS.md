@@ -21,7 +21,7 @@ made yet.
 | npm package | [`packages/kotlin-wasm`](packages/kotlin-wasm) | working, unpublished |
 | static server | [`serve.mjs`](serve.mjs) | working |
 | minikotlin smoke test | [`test/smoke.mjs`](test/smoke.mjs) | passing |
-| package tests | `packages/kotlin-wasm/test/*.test.js` | 14/14 passing |
+| package tests | `packages/kotlin-wasm/test/*.test.js` | 18/18 passing (Wasm + JS) |
 | toolchain build/upgrade | [`packages/kotlin-wasm/scripts`](packages/kotlin-wasm/scripts), [`TOOLCHAIN.md`](packages/kotlin-wasm/TOOLCHAIN.md) | working |
 | technical record | this file | — |
 
@@ -61,10 +61,10 @@ browser-kotlin/
   packages/kotlin-wasm/      @live-codes/kotlin-wasm
     assets/                  compiler image, wrapper, gz parts, manifest
     bin/copy-assets.mjs      verifies and copies assets
-    dist/kotlin-wasm.global.js  committed IIFE build (11.5 KB)
+    dist/kotlin-wasm.global.js  committed IIFE build (14.5 KB)
     src/                     browser/Node engines, API, stdin prelude
-    scripts/                 build IIFE, regenerate receipts
-    test/                    14 Node tests
+    scripts/                 build IIFE, toolchain build/vendor, receipts, js-target
+    test/                    18 Node tests
     example/                 ESM and classic-worker browser checks
     toolchain.lock.json      upstream commits and every asset hash
     TOOLCHAIN.md             build/upgrade process
@@ -219,7 +219,7 @@ The final image stage is the constraint on a 16 GB machine:
 | stdlib | 12,005,328 B raw, 3,811,357 B gz |
 | generated host + glue | 97,501 B (`kotlin-compiler-image.js`) |
 | manifest | 467 B |
-| package tests | 14/14 pass on Node 24 with `--experimental-wasm-exnref` |
+| package tests | 18/18 pass on Node 24 with `--experimental-wasm-exnref` (Wasm and JS) |
 
 The image SHA-256 is `90ed9c9b12d3c5cbcde987d6f8a3b2e8cc8b51840e0f5767af0cbc79f31c6d91`;
 the stdlib is unchanged from the prebuilt bootstrap
@@ -434,6 +434,58 @@ compiles an empty program once, so the first user run is warm.
   tied to the Oracle GraalVM/Binaryen versions in the lock.
 - Oracle GraalVM terms still govern the generated image; see §11.
 
+### 4.11 JS target — the second backend
+
+K2 also ships a Kotlin/JS backend. The second target uses it without changing
+the Wasm path:
+
+- `scripts/js-target/JsCompilerHost.kt` calls `K2JSCompiler` with the
+  `kotlin-stdlib-js` klib.
+- Like the Wasm host, it is a **two-pass** build: first produce a klib
+  (`-ir-output-dir <klib> -nopack source`), then produce JavaScript
+  (`-ir-output-dir <js> -Xinclude=<klib> -Xir-produce-js -module-kind es
+  -Xir-dce`). Passing `-Xir-produce-js` without `-Xinclude` fails with
+  “not possible to produce a KLIB … and compile … JavaScript”.
+- The output is one self-contained **`main.mjs`** (17,417 bytes for the hello
+  sample). It contains the Kotlin/JS stdlib and polyfills; there is no wasm and
+  no import object. A browser compile measured ~1.24 s, run ~6.4 ms; Node compiles
+  took ~3.5 s, run ~69 ms.
+- Kotlin/JS chooses its output stream at runtime: `isNode ?
+  NodeJsOutput(process.stdout) : BufferedOutputToConsoleLog()`. The package
+  captures `process.stdout`/`stderr` in the Node worker and overrides `console`
+  in the browser program worker, so both produce the expected output.
+
+The JS target is a second GraalVM image, built by `:compiler-host:jsJvmScenario`
+and `:compiler-host:jsWebImage` (the JS agent metadata is recorded by the
+scenario):
+
+| Part | Size |
+| --- | ---: |
+| JS compiler image | 74,999,356 B raw / 29,322,529 B gz, split into 14,661,265 + 14,661,264 |
+| Kotlin/JS stdlib archive | 10,493,338 B raw / 3,304,275 B gz |
+| generated host | 97,505 B |
+| wrapper | 4,020 B |
+| manifest | 462 B |
+| **total** | **32,728,791 B (31.2 MiB) gz / 85,492,694 B (81.5 MiB) inflated** |
+
+The JS compiler image still needs WasmGC and exception handling; only the
+emitted program is JavaScript. Build it with `TARGET=js
+scripts/build-toolchain.sh`, vendor with `toolchain.mjs vendor --target js`, and
+use `createCompiler({ target: 'js' })`.
+
+The package exposes the JS output directly:
+
+```js
+const compiler = await createCompiler({ target: 'js' });
+const compiled = await compiler.compile(source);
+compiled.files[0] // { name: 'main.mjs', content: '…', encoding: 'utf8' }
+```
+
+`run()` compiles and executes the module in a worker; `compile()` is the path
+for a host (LiveCodes) that wants to send the JavaScript to a result page and run
+it there. JS stdin is not implemented; `capabilities.stdin` is false for this
+target.
+
 ---
 
 ## 5. Part 3 — `@live-codes/kotlin-wasm`
@@ -451,11 +503,29 @@ const result = await compiler.run(code, input);
 compiler.dispose();
 ```
 
-Options: `baseUrl` (required in a browser; optional in Node), `onProgress`,
-`fileName`. `runOptions`: `timeoutMs` (program, default 15000),
-`compileTimeoutMs` (default 180000), `fileName`.
+Options: `target` (`wasm` default, or `js`), `baseUrl` (required in a browser;
+optional in Node), `onProgress`, `fileName`. `runOptions`: `timeoutMs` (program,
+default 15000), `compileTimeoutMs` (default 180000), `fileName`.
 
-Result:
+`compile(code, { fileName, timeoutMs })` returns the emitted files without
+running:
+
+```ts
+{
+  ok: boolean;
+  target: 'wasm' | 'js';
+  compilerVersion: string;
+  fileName: string;
+  compileMs: number;
+  errors: string[];
+  files: { name: string; content: string; encoding: 'utf8' | 'base64' }[];
+}
+```
+
+The JS target returns `main.mjs` as UTF-8 text; the Wasm target returns
+`main.wasm` plus its JS glue as base64.
+
+`run()` result:
 
 ```ts
 {
@@ -471,9 +541,12 @@ Result:
 
 Also exported: `LANGUAGE_IDS = ['kotlin']`, `COMPILER_VERSION` (`2.5.0-dev-9169`),
 `KotlinWasmError`, `KotlinUnsupportedError`. `capabilities` on a compiler is
-`{ language, compiler, stdin: true, wasmGc: true, analysis: false }`.
+`{ language, compiler, target, stdin, wasmGc, programWasmGc, analysis }`.
+`stdin` is true only for the Wasm target; `programWasmGc` follows the target
+while `wasmGc` remains true because the compiler image is Wasm.
 
-The API accepts `input` as `string`, `Uint8Array` or `ArrayBuffer`.
+The API accepts `input` as `string`, `Uint8Array` or `ArrayBuffer` for the Wasm
+target. The JS target does not implement stdin yet.
 
 ### 5.2 Entries
 
@@ -481,7 +554,7 @@ The API accepts `input` as `string`, `Uint8Array` or `ArrayBuffer`.
 | --- | --- | --- |
 | Browser ESM | `src/index.js` | bundlers, module workers |
 | Node | `src/index.node.js` | `node --experimental-wasm-exnref` |
-| IIFE | `dist/kotlin-wasm.global.js` (11.5 KB minified) | classic workers, `importScripts` |
+| IIFE | `dist/kotlin-wasm.global.js` (14.5 KB minified) | classic workers, `importScripts` |
 | CLI | `bin/copy-assets.mjs` | copy/verify assets |
 
 The IIFE is committed; `prepack` rebuilds it with esbuild.
@@ -501,8 +574,12 @@ The IIFE is committed; `prepack` rebuilds it with esbuild.
   - image stdlib URL → absolute stdlib URL.
 - The wrapper's `asset-progress` messages drive `onProgress`; a warm-up compile
   drives readiness.
-- Each run compiles through the compiler worker, then starts a fresh module
-  program worker with the four generated files as Blob URLs.
+- Each run compiles through the compiler worker. For `wasm`, it starts a fresh
+  module program worker with the four generated files as Blob URLs. For `js`, it
+  imports the single `main.mjs` Blob in a module worker; there is no wasm import
+  object. `compile()` skips the program worker and returns the files.
+- The target-specific base URL is the assets root; for `js` the engine appends
+  `js/` before fetching the wrapper/manifest/image.
 - Compile requests use a 180 s timeout; program runs use 15 s and terminate only
   the program worker, leaving the compiler warm.
 - `dispose()` releases the record; the last reference terminates the compiler
@@ -540,9 +617,9 @@ on port 8001; the compiler loaded and ran.
 
 ### 5.6 Tests and verification
 
-Package tests (Node, `npm test`, 14/14):
+Package tests (Node, `npm test`, 18/18: Wasm and JS):
 
-1. every asset matches its receipt;
+1. every Wasm and JS asset matches its receipt;
 2. every file is under 20 MB;
 3. parts inflate to the pinned compiler and stdlib;
 4. language/version/capabilities;
@@ -566,9 +643,9 @@ Browser checks:
 
 Packaging checks:
 
-- `npm publish --dry-run --ignore-scripts`: clean, 36 files, 32.5 MB, public
+- `npm pack --dry-run --ignore-scripts`: clean, 46 files, 65.1 MB, public
   access, `LICENSE` + `NOTICE` + `THIRD-PARTY-NOTICES.md` + `licenses/`, no
-  warnings;
+  warnings; the tarball contains both `assets/` and `assets/js/`;
 - the packed tarball was installed into a clean project; the Node API ran with
   stdin and `npx kotlin-wasm-copy-assets --print-path` resolved the installed
   assets;
@@ -608,13 +685,14 @@ and publishing with `--provenance` from CI.
 | real-K2 browser demo, all examples | pass |
 | real-K2 diagnostics | pass, correct line/column |
 | real-K2 infinite loop | 15 s timeout; compiler survives |
-| package Node tests | 14/14 |
+| package Node tests | 18/18 (Wasm + JS) |
 | package ESM browser example + stdin | pass |
+| package JS target example (compile + run) | pass |
 | package IIFE classic worker + stdin | pass |
 | cross-origin assets (two ports, CORS) | pass |
-| fresh clone package tests | 14/14 |
+| fresh clone package tests | 18/18 (Wasm + JS) |
 | packed tarball install + API + CLI | pass |
-| `npm publish --dry-run` | no warnings, 27 files, 29.5 MB |
+| `npm pack --dry-run` | 46 files, 65.1 MB, both targets, no warnings |
 
 ---
 
@@ -654,7 +732,7 @@ LiveCodes uses the same CDN-vendor pattern as `@live-codes/dlang-wasm` and
      - `compiler.liveReload: true`
      - `extensions: ['kt']`
      - `editor: 'script'`
-      - `largeDownload: true` (32 MB first load)
+      - `largeDownload: true` (~32 MB first load per target)
      - editor support:
        - Monaco: `monacoLanguagesBaseUrl + 'kotlin.js'`, language `kotlin`
          (`@live-codes/monaco-languages@0.3.14/dist/kotlin.js` exists);
@@ -679,6 +757,14 @@ LiveCodes uses the same CDN-vendor pattern as `@live-codes/dlang-wasm` and
      ```
      Use `createWorkerRunner`/`runCompiler` like `d-wasm`, with a generous
      `timeoutMs` (D uses 120 s).
+
+     For the **JS target**, the compiler worker uses
+     `createCompiler({ target: 'js', baseUrl })`, calls `compile(code)`, and
+     posts the returned `files` (`main.mjs` with `encoding: 'utf8'`) to the
+     result page. The result page creates a Blob URL and imports/executes the
+     module itself; no Wasm import object is involved. The compiler image still
+     needs WasmGC, so the worker environment is unchanged. JS stdin is not
+     supported.
    - `index.ts`: re-export the spec.
 3. Register `kotlinWasm` in `src/livecodes/languages/languages.ts` (import +
    language array) near `dWasm`.
@@ -709,9 +795,16 @@ LiveCodes uses the same CDN-vendor pattern as `@live-codes/dlang-wasm` and
   CDN does not resolve the npm package's redistribution rights.
 - **No Analysis API**: no semantic completion/lint. Editor highlighting works via
   Monaco/CodeMirror; compiler diagnostics are shown after Run.
-- **32 MB first load**: `largeDownload: true` and lazy loading are required.
+- **~32 MB first load per target**: `largeDownload: true` and lazy loading are
+  required. The Wasm target is ~32.4 MB gz; the JS target ~32.7 MB gz. The
+  result page only needs the JS target for JS modules; the compiler worker still
+  loads the compiler image.
+- **JS target output**: use `compiler.compile(code)` in the compiler worker and
+  send the returned `main.mjs` text to the result page; it can import it as a
+  module without Wasm. The compiler image still needs WasmGC; only the emitted
+  program is JavaScript. JS stdin is not implemented.
 - **Dev compiler**: `2.5.0-dev-9169` is not a stable Kotlin release; upgrading
-  means rebuilding the GraalVM image.
+  means rebuilding both GraalVM images (`TARGET=wasm` and `TARGET=js`).
 
 ---
 
@@ -719,26 +812,34 @@ LiveCodes uses the same CDN-vendor pattern as `@live-codes/dlang-wasm` and
 
 | Route | Result |
 | --- | --- |
-| **Real K2 via GraalVM Web Image** (this package) | Genuine Kotlin, works; ~32 MB gz / ~85 MB inflated; built from source; licensing to clear |
+| **Real K2 via GraalVM Web Image** (this package) | Genuine Kotlin, works; Wasm and JS targets; ~32 MB gz compiler per target; built from source; licensing to clear |
 | **minikotlin** (this repo's other demo) | ~1.9 MB, instant, but a subset; no published licence |
 | **TeaVM + Kotlin class files** | Kotlin class files run 8/8 on the TeaVM back end (see `../browser-jvm/FINDINGS.md`), but no browser compiler emits JVM class files |
 | **Doppio JVM in JS** | `kotlinc` compiles took ~7–20 minutes and often did not finish; abandoned by `@live-codes/java-wasm` |
 | **Scala/other wasm packages** | Separate packages per toolchain; `@live-codes/scala-wasm` is the house pattern for a wasm compiler distribution |
 
-The decision: keep minikotlin as the tiny subset demo; use the real K2 image
-for the package, because it is actual Kotlin and the payload can be shipped
-gzipped/split.
+The decision: keep minikotlin as the tiny subset demo; use the real K2 images
+for the package, because they are actual Kotlin and the payload can be shipped
+gzipped/split. Keep both Wasm and JS targets: the Wasm program is small and
+uses WasmGC; the JS target gives a standalone module that a result page can run
+without a Wasm import object.
 
 ---
 
 ## 9. Open questions / honest unknowns
 
-- **Asset licensing.** The generated image carries GraalVM runtime terms.
-  Building it from source gives provenance, not redistribution rights; Oracle's
+- **Asset licensing.** Both generated images carry GraalVM runtime terms.
+  Building them from source gives provenance, not redistribution rights; Oracle's
   terms need clearance before publishing the npm package.
 - **LiveCodes nested workers.** Not yet tested inside the LiveCodes result
-  sandbox/CSP; this is the first integration experiment.
-- **Node 22** specifically, and **Firefox/Safari**, have not been tested.
+  sandbox/CSP; this is the first integration experiment. The JS target adds no
+  program wasm, but the compiler worker is still a nested Blob worker.
+- **JS stdin.** Not implemented; `capabilities.stdin` is false for the JS target.
+  The emitted JS program itself is ordinary JavaScript.
+- **JS compiler image.** It is still a ~32.7 MB gz GraalVM image and needs
+  WasmGC/exception handling; only the emitted program avoids WasmGC.
+- **Node 22** specifically, and **Firefox/Safari**, have not been tested. The JS
+  target's Node and Chromium paths were tested here.
 - **Browser asset integrity.** The wrapper trusts `baseUrl`; hashes are verified
   by `copy-assets`, the Node tests and `npm run assets`, but not at browser
   fetch time. A `crypto.subtle` check could be added, at the cost of hashing
@@ -746,10 +847,10 @@ gzipped/split.
 - **`@JsFun` prelude edge cases.** File-level annotations, explicit
   `import kotlin.io.readln`, or unusual package declarations are not specifically
   handled; standard playground snippets are.
-- **Rebuild reproducibility.** The image is rebuilt by
-  `scripts/build-toolchain.sh`; the upstream commit, Kotlin/GraalVM/Binaryen
-  versions, heap and every hash are pinned. A 12 GB WSL VM with `HEAP=8g` is the
-  smallest configuration verified here.
+- **Rebuild reproducibility.** Both images are rebuilt by
+  `scripts/build-toolchain.sh` (`TARGET=wasm`/`TARGET=js`); the upstream commit,
+  Kotlin/GraalVM/Binaryen versions, heap and every hash are pinned. A 12 GB WSL
+  VM with `HEAP=8g` is the smallest configuration verified here.
 - **Stable Kotlin.** The pinned compiler is a dev build; no stable K2/Wasm
   browser image was available.
 - **No CI** yet for the package (tests/`npm pack`).
@@ -764,7 +865,8 @@ gzipped/split.
 ```sh
 node serve.mjs
 # http://localhost:8001/          minikotlin
-# http://localhost:8001/real.html real K2
+# http://localhost:8001/real.html real K2 (Wasm)
+# http://localhost:8001/packages/kotlin-wasm/example/js.html real K2 (JS)
 ```
 
 ### minikotlin test
@@ -780,9 +882,10 @@ cd packages/kotlin-wasm
 npm install --include=dev      # esbuild is a devDependency
 npm run assets                 # verify toolchain.lock.json and regenerate receipts
 npm run build:iife             # rebuild dist/
-npm test                       # 14/14, Node with --experimental-wasm-exnref
+npm test                       # 18/18, Node with --experimental-wasm-exnref
 node ../../serve.mjs 8001
 # http://localhost:8001/packages/kotlin-wasm/example/
+# http://localhost:8001/packages/kotlin-wasm/example/js.html
 # http://localhost:8001/packages/kotlin-wasm/example/iife.html
 ```
 
@@ -797,14 +900,20 @@ npm publish
 
 - Kotlin `2.5.0-dev-9169`
 - host `alex28sh/wasm-code-editor@02a8916077b1ea697808f258dee5a5406c887774`
-- compiled with Oracle GraalVM `25.0.4+7.1` and Binaryen `133`, heap `8g`,
-  on `2026-10-23T05:46:56Z`
-- compiler image raw `72,602,076 B`, SHA-256
+- Wasm target compiled with Oracle GraalVM `25.0.4+7.1` and Binaryen `133`,
+  heap `8g`, on `2026-10-23T05:46:56Z`
+- JS target compiled with the same tools, heap `8g`, on
+  `2026-10-23T07:23:57Z`
+- Wasm compiler image raw `72,602,076 B`, SHA-256
   `90ed9c9b12d3c5cbcde987d6f8a3b2e8cc8b51840e0f5767af0cbc79f31c6d91`
-- stdlib raw `12,005,328 B`, SHA-256
+- Kotlin/Wasm stdlib raw `12,005,328 B`, SHA-256
   `1745038e115f1b1f591a0fdfd745458c91fa938dc4303898d4d2a63aacfabf21`
-- every compressed part, the host, wrapper and manifest are hashed in
-  `packages/kotlin-wasm/toolchain.lock.json`.
+- JS compiler image raw `74,999,356 B`, SHA-256
+  `1b07b557851009dfef305c8797e1e5ea53f6f2dd5b9f89f6e24eb958a313f60e`
+- Kotlin/JS stdlib raw `10,493,338 B`, SHA-256
+  `ca8fdeef1f5707f605bd52878e79cc6705fa3bb811d08052a66d46902aa38083`
+- every compressed part, the host, wrapper and manifest for both targets are
+  hashed in `packages/kotlin-wasm/toolchain.lock.json`.
 
 ---
 
@@ -812,18 +921,18 @@ npm publish
 
 **This package's own code is Apache-2.0**, the same license as the Kotlin
 compiler. `LICENSE` contains the Apache-2.0 text and a note that it does not
-cover `assets/`; `NOTICE` and `licenses/` carry the Kotlin and GraalVM
-attribution.
+cover `assets/` and `assets/js/`; `NOTICE` and `licenses/` carry the Kotlin and
+GraalVM attribution.
 
 The assets are third-party:
 
-- **Kotlin compiler (K2) and Kotlin/Wasm standard library:** Apache-2.0,
-  developed by JetBrains s.r.o. and the Kotlin Programming Language contributors.
-  Kotlin's third-party notices are at
+- **Kotlin compiler (K2), Kotlin/Wasm and Kotlin/JS standard libraries:**
+  Apache-2.0, developed by JetBrains s.r.o. and the Kotlin Programming Language
+  contributors. Kotlin's third-party notices are at
   <https://github.com/JetBrains/kotlin/blob/master/license/README.md>.
-- **GraalVM Web Image runtime:** the generated image embeds GraalVM runtime
-  code; the generated script carries GPLv2 + Classpath Exception headers, and
-  the committed build used Oracle GraalVM 25.0.4 under the GraalVM Free Terms
+- **GraalVM Web Image runtime:** both generated images embed GraalVM runtime
+  code; the generated scripts carry GPLv2 + Classpath Exception headers, and
+  the committed builds used Oracle GraalVM 25.0.4 under the GraalVM Free Terms
   and Conditions (GFTC). The GFTC, Oracle's `NOTICE.txt` and the distribution's
   license-information manual are reproduced in `licenses/`.
 
@@ -836,8 +945,9 @@ to the GraalVM image.
 `minikotlin` also publishes no licence on `minikotlin.run`; its vendored copy in
 `vendor/minikotlin/` is evaluation-only as well.
 
-`assets/kotlin-compiler-image.js` and the `.wasm` parts are built from the
-pinned upstream source by `scripts/build-toolchain.sh`. Only transport wrappers
-were added: gzip, splitting into two parts, a manifest, a
-`DecompressionStream` wrapper and, at runtime, a `wasm_path`/stdlib URL rewrite
-for Blob workers. The generated image is otherwise untouched.
+`assets/kotlin-compiler-image.js`/`.wasm` and `assets/js/kotlin-compiler-image.js`
+/`.wasm` are built from the pinned upstream source by
+`scripts/build-toolchain.sh`. Only transport wrappers were added: gzip,
+splitting into two parts, a manifest, a `DecompressionStream` wrapper and, at
+runtime, a `wasm_path`/stdlib URL rewrite for Blob workers. The generated images
+are otherwise untouched.

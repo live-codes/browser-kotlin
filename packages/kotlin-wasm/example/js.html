@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@live-codes/kotlin-wasm — JS target</title>
+  <style>
+    :root { color-scheme: dark; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { margin: 0; padding: 24px; background: #111; color: #e8e8e8; }
+    h1 { font-size: 18px; font-weight: 600; }
+    h2 { font-size: 13px; color: #888; margin-top: 24px; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #1b1b1b; padding: 14px; border: 1px solid #333; }
+    #js { max-height: 45vh; overflow: auto; }
+    a { color: #8ab4f8; }
+  </style>
+</head>
+<body>
+  <h1>@live-codes/kotlin-wasm — JS target</h1>
+  <p>The compiler runs in a worker. <code>compile()</code> returns a standalone <code>main.mjs</code>; this page displays it and then runs it separately.</p>
+  <p><a href="index.html">Wasm target example</a></p>
+
+  <h2>Compiled JavaScript</h2>
+  <pre id="js">loading the compiler and compiling…</pre>
+
+  <h2>Run result</h2>
+  <pre id="out">waiting…</pre>
+
+  <script type="module">
+    import { createCompiler } from '../src/index.js';
+
+    const jsOut = document.getElementById('js');
+    const out = document.getElementById('out');
+    const source = [
+      'fun main() {',
+      '    println("hello from Kotlin/JS")',
+      '    val p = 2 + 3',
+      '    println("sum = " + p)',
+      '}'
+    ].join('\n');
+
+    try {
+      const compiler = await createCompiler({
+        target: 'js',
+        baseUrl: new URL('../assets/', location.href).href
+      });
+      const compiled = await compiler.compile(source);
+      const module = compiled.files.find((file) => file.name === 'main.mjs');
+      jsOut.textContent = module ? module.content : JSON.stringify(compiled, null, 2);
+
+      const result = await compiler.run(source);
+      out.textContent = JSON.stringify(
+        {
+          stdout: result.stdout,
+          stderr: result.stderr,
+          errors: result.errors,
+          exitCode: result.exitCode,
+          compileMs: result.compileMs,
+          runMs: result.runMs
+        },
+        null,
+        2
+      );
+      compiler.dispose();
+    } catch (error) {
+      jsOut.textContent = '';
+      out.textContent = String(error?.stack || error);
+    }
+  </script>
+</body>
+</html>

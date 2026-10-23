@@ -82,6 +82,16 @@ parentPort.on('message', async (message) => {
       return;
     }
 
+    if (message.type === 'compile') {
+      const answer = compile(message.source);
+      post({
+        type: 'result',
+        id: message.id,
+        result: { answer, compileMs: answer.milliseconds, runMs: null }
+      });
+      return;
+    }
+
     if (message.type !== 'run') {
       post({ type: 'error', id: message.id, message: 'Unknown request.' });
       return;
@@ -123,6 +133,21 @@ parentPort.on('message', async (message) => {
       original[level] = console[level];
       console[level] = (...values) => send(values.map(String).join(' '), 'stderr', true);
     }
+    // Kotlin/JS writes through the process streams in Node.
+    const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stdout.write = (chunk, encoding, callback) => {
+      send(String(chunk), 'stdout', false);
+      if (typeof encoding === 'function') encoding();
+      else if (typeof callback === 'function') callback();
+      return true;
+    };
+    process.stderr.write = (chunk, encoding, callback) => {
+      send(String(chunk), 'stderr', false);
+      if (typeof encoding === 'function') encoding();
+      else if (typeof callback === 'function') callback();
+      return true;
+    };
 
     let runtimeError = null;
     const runStart = performance.now();
@@ -132,6 +157,8 @@ parentPort.on('message', async (message) => {
       runtimeError = String(error?.stack || error);
     } finally {
       for (const level of Object.keys(original)) console[level] = original[level];
+      process.stdout.write = originalStdoutWrite;
+      process.stderr.write = originalStderrWrite;
       delete globalThis.write;
       delete globalThis[JS_STDIN_HOOK];
       await rm(runDir, { recursive: true, force: true }).catch(() => {});

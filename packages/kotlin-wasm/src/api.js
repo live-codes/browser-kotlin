@@ -13,6 +13,14 @@ function normalizeInput(input) {
   throw new Error('run() input must be a string, Uint8Array or ArrayBuffer.');
 }
 
+function normalizeTarget(target) {
+  if (target == null) return 'wasm';
+  if (target !== 'wasm' && target !== 'js') {
+    throw new Error("target must be 'wasm' or 'js'.");
+  }
+  return target;
+}
+
 // One implementation, two entries: `index.js` starts the compiler worker in a
 // browser, `index.node.js` starts it in a Node worker thread.
 export function createApi({ createEngine }) {
@@ -20,17 +28,21 @@ export function createApi({ createEngine }) {
     if (typeof options === 'string') {
       throw new Error(
         'createCompiler takes an options object; Kotlin is the only language. ' +
-          'Call createCompiler({ baseUrl }).'
+          'Call createCompiler({ baseUrl, target }).'
       );
     }
 
-    const engine = await createEngine(options);
+    const target = normalizeTarget(options.target);
+    const engine = await createEngine({ ...options, target });
     const fileName = options.fileName || DEFAULT_FILE_NAME;
     let disposed = false;
 
     return {
       /** The only language this package runs. */
       language: 'kotlin',
+
+      /** `wasm` (default) or `js`. */
+      target,
 
       /** The name diagnostics use for the single source file. */
       fileName,
@@ -42,22 +54,45 @@ export function createApi({ createEngine }) {
       capabilities: Object.freeze({
         language: 'kotlin',
         compiler: COMPILER_VERSION,
-        stdin: true,
+        target,
+        stdin: target === 'wasm',
         wasmGc: true,
+        programWasmGc: target === 'wasm',
         analysis: false
       }),
+
+      /**
+       * Compile one program and return the emitted files without running it.
+       *
+       * The JS target emits a self-contained `main.mjs` (UTF-8 text); the Wasm
+       * target emits `main.wasm` and its JS glue (base64 in `content`).
+       *
+       * @param {string} code - Kotlin source.
+       * @param {object} [compileOptions]
+       * @param {string} [compileOptions.fileName] - name used in diagnostics.
+       * @param {number} [compileOptions.timeoutMs] - compiler timeout.
+       */
+      async compile(code, compileOptions = {}) {
+        if (disposed) throw new Error('This compiler has been disposed.');
+        if (typeof code !== 'string') {
+          throw new Error('compile() needs the program source as its first argument.');
+        }
+        return engine.compile({
+          code,
+          fileName: compileOptions.fileName || fileName,
+          compileTimeoutMs: compileOptions.timeoutMs
+        });
+      },
 
       /**
        * Compile and run one program.
        *
        * @param {string} code - Kotlin source.
        * @param {string|Uint8Array|ArrayBuffer} [input] - lines pre-supplied to
-       *   `readln()` / `readlnOrNull()` / `readLine()`. Not interactive.
+       *   `readln()` / `readlnOrNull()` / `readLine()`. Only the Wasm target.
        * @param {object} [runOptions]
        * @param {number} [runOptions.timeoutMs] - how long the program may run.
        * @param {string} [runOptions.fileName] - name used in diagnostics.
-       * @returns {Promise<{stdout: string, stderr: string, output: string, errors: string[],
-       *   exitCode: number|null, compileMs: number, runMs: number|null}>}
        */
       async run(code, input, runOptions = {}) {
         if (disposed) throw new Error('This compiler has been disposed.');

@@ -58,5 +58,64 @@
     "file": "kotlin-assets.json",
     "bytes": 467,
     "sha256": "59214c997286ebb85942ab9c3a585c68b740b2c6f71386833b7ffd2c383f683b"
+  },
+  "javascript": {
+    "version": "2.5.0-dev-9169",
+    "host": {
+      "repository": "https://github.com/alex28sh/wasm-code-editor",
+      "commit": "02a8916077b1ea697808f258dee5a5406c887774"
+    },
+    "build": {
+      "repository": "https://github.com/alex28sh/wasm-code-editor",
+      "commit": "02a8916077b1ea697808f258dee5a5406c887774",
+      "graalvm": "native-image 25.0.4 2026-07-21",
+      "binaryen": "wasm-as version 133 (version_133)",
+      "tasks": [
+        ":compiler-host:jsJvmScenario",
+        ":compiler-host:jsWebImage"
+      ],
+      "heap": "8g",
+      "built": "2026-10-23T07:23:57Z"
+    },
+    "assets": {
+      "compilerImage": {
+        "gzParts": [
+          {
+            "file": "kotlin-compiler-worker.js.wasm.gz.0",
+            "bytes": 14661265,
+            "sha256": "c1f8bc7399c7d6bb1515721a7ac7fbd820d6e35d3d9022185213954f6acf2a36"
+          },
+          {
+            "file": "kotlin-compiler-worker.js.wasm.gz.1",
+            "bytes": 14661264,
+            "sha256": "a69bd4939a7ca5c519d1e3cadce07d2127a251246567f8aae773ad74b7bbae86"
+          }
+        ],
+        "gzBytes": 29322529,
+        "rawBytes": 74999356,
+        "rawSha256": "1b07b557851009dfef305c8797e1e5ea53f6f2dd5b9f89f6e24eb958a313f60e"
+      },
+      "stdlib": {
+        "file": "kotlin-stdlib-js.bin.gz",
+        "gzBytes": 3304275,
+        "rawBytes": 10493338,
+        "rawSha256": "ca8fdeef1f5707f605bd52878e79cc6705fa3bb811d08052a66d46902aa38083"
+      }
+    },
+    "generatedHost": {
+      "file": "kotlin-compiler-image.js",
+      "bytes": 97505,
+      "sha256": "2e6211e8417a2353c3abcfa2bf8de6d91baa0097cf7c45b63d30366e998eb9da"
+    },
+    "wrapper": {
+      "file": "kotlin-compiler-worker.js",
+      "bytes": 4020,
+      "sha256": "29f173371e2b538303917f82f45122a1db7243b3874ee3d19039e7ed7dd4bc71"
+    },
+    "manifest": {
+      "file": "kotlin-assets.json",
+      "bytes": 462,
+      "sha256": "8dfc994ac40c8f2fe29e701c16fb4731f0636c69cdaa72643148a4a4732336ff"
+    }
   }
 }

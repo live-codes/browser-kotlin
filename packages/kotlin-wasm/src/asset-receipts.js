@@ -26,3 +26,29 @@ export const ASSET_RECEIPTS = {
     "sha256": "8fec8e6f1cb4b5696240c8630b481d259018c4308e4dfabad339a7cb65c3e4e0"
   }
 };
+export const JS_ASSET_RECEIPTS = {
+  "kotlin-assets.json": {
+    "bytes": 462,
+    "sha256": "8dfc994ac40c8f2fe29e701c16fb4731f0636c69cdaa72643148a4a4732336ff"
+  },
+  "kotlin-compiler-image.js": {
+    "bytes": 97505,
+    "sha256": "2e6211e8417a2353c3abcfa2bf8de6d91baa0097cf7c45b63d30366e998eb9da"
+  },
+  "kotlin-compiler-worker.js": {
+    "bytes": 4020,
+    "sha256": "29f173371e2b538303917f82f45122a1db7243b3874ee3d19039e7ed7dd4bc71"
+  },
+  "kotlin-compiler-worker.js.wasm.gz.0": {
+    "bytes": 14661265,
+    "sha256": "c1f8bc7399c7d6bb1515721a7ac7fbd820d6e35d3d9022185213954f6acf2a36"
+  },
+  "kotlin-compiler-worker.js.wasm.gz.1": {
+    "bytes": 14661264,
+    "sha256": "a69bd4939a7ca5c519d1e3cadce07d2127a251246567f8aae773ad74b7bbae86"
+  },
+  "kotlin-stdlib-js.bin.gz": {
+    "bytes": 3304275,
+    "sha256": "e24bdc0de4da8571fa3ae7521733b1bf123facfea8732355acce98937cba765e"
+  }
+};

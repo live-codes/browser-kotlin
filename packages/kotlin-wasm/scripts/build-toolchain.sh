@@ -3,23 +3,33 @@
 # The Analysis API image is intentionally not built: this package only compiles.
 #
 # Linux/WSL:
-#   bash scripts/build-toolchain.sh
-#   HEAP=6g GRADLE_HEAP=1536m GRADLE_WORKERS=2 bash scripts/build-toolchain.sh
+#   bash scripts/build-toolchain.sh                 # Wasm target
+#   TARGET=js bash scripts/build-toolchain.sh       # JS target
+#   HEAP=8g GRADLE_HEAP=1024m GRADLE_WORKERS=2 bash scripts/build-toolchain.sh
 #
-# Output: .toolchain/compilerDist (generated worker + wasm + stdlib + build-info).
-# Then:   node scripts/toolchain.mjs vendor --compiler-dist .toolchain/compilerDist
+# Outputs: .toolchain/compilerDist (Wasm) or .toolchain/js-compilerDist (JS).
+# Then:    node scripts/toolchain.mjs vendor --compiler-dist ...
+#          node scripts/toolchain.mjs vendor --target js --compiler-dist ...
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET="${TARGET:-wasm}"
+case "$TARGET" in
+  wasm|js) ;;
+  *) echo "TARGET must be 'wasm' or 'js'." >&2; exit 1 ;;
+esac
 WORK="${WORK_DIR:-$ROOT/.toolchain}"
 REPO="${UPSTREAM_REPO:-https://github.com/alex28sh/wasm-code-editor.git}"
 COMMIT="${UPSTREAM_COMMIT:-02a8916077b1ea697808f258dee5a5406c887774}"
 UPSTREAM_DIR="${UPSTREAM_DIR:-$WORK/wasm-code-editor}"
-DIST="${DIST_DIR:-$WORK/compilerDist}"
+DEFAULT_DIST="$WORK/compilerDist"
+if [ "$TARGET" = js ]; then DEFAULT_DIST="$WORK/js-compilerDist"; fi
+DIST="${DIST_DIR:-$DEFAULT_DIST}"
 HEAP="${HEAP:-8g}"
 GRADLE_HEAP="${GRADLE_HEAP:-1024m}"
 GRADLE_WORKERS="${GRADLE_WORKERS:-2}"
 KOTLIN="${KOTLIN_VERSION:-}"
+TOOLCHAIN_SRC="$ROOT/scripts/js-target"
 
 if [ -z "${GRAALVM_HOME:-}" ]; then
   GRAALVM_HOME="$(find "$WORK/graalvm" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -n 1 || true)"
@@ -83,6 +93,17 @@ if ! grep -q -- '-J--sun-misc-unsafe-memory-access=allow' compiler-host/build.gr
   rm -f compiler-host/build.gradle.kts.bak
 fi
 
+if [ "$TARGET" = js ]; then
+  mkdir -p compiler-host/src/main/kotlin/editor/compilerhost
+  mkdir -p compiler-host/src/main/java/editor/compilerhost/web
+  cp "$TOOLCHAIN_SRC/JsCompilerHost.kt" compiler-host/src/main/kotlin/editor/compilerhost/
+  cp "$TOOLCHAIN_SRC/JsJvmScenario.kt" compiler-host/src/main/kotlin/editor/compilerhost/
+  cp "$TOOLCHAIN_SRC/WebMainJs.java" compiler-host/src/main/java/editor/compilerhost/web/
+  if ! grep -q 'jsWebImage' compiler-host/build.gradle.kts; then
+    cat "$TOOLCHAIN_SRC/js-target.gradle.kts" >> compiler-host/build.gradle.kts
+  fi
+fi
+
 sed -i.bak "s/^kotlin = \".*\"/kotlin = \"${KOTLIN}\"/" gradle/libs.versions.toml
 rm -f gradle/libs.versions.toml.bak
 sed -i.bak "s/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx${GRADLE_HEAP}/" gradle.properties
@@ -93,18 +114,37 @@ grep -q '^kotlin.compiler.execution.strategy=' gradle.properties ||
   echo 'kotlin.compiler.execution.strategy=in-process' >> gradle.properties
 printf 'graalvm.home=%s\n' "$GRAALVM_HOME" > local.properties
 
-echo "Kotlin ${KOTLIN}"
+echo "Kotlin ${KOTLIN}; target ${TARGET}"
 "$GRAALVM_HOME/bin/native-image" --version | head -n 1
 echo "wasm-as: $(wasm-as --version | head -n 1)"
 echo "heap: ${HEAP}; Gradle heap: ${GRADLE_HEAP}; workers: ${GRADLE_WORKERS}"
 
-bash gradlew --no-daemon --max-workers="$GRADLE_WORKERS" --console=plain \
-  :compiler-host:stdlibArchive :compiler-host:webImage
+if [ "$TARGET" = js ]; then
+  bash gradlew --no-daemon --max-workers="$GRADLE_WORKERS" --console=plain \
+    -PjsImage.heap="$HEAP" :compiler-host:jsWebImage
+else
+  bash gradlew --no-daemon --max-workers="$GRADLE_WORKERS" --console=plain \
+    :compiler-host:stdlibArchive :compiler-host:webImage
+fi
 
-WEB="$UPSTREAM_DIR/compiler-host/build/webImage"
-STDLIB="$UPSTREAM_DIR/compiler-host/build/stdlib/kotlin-stdlib-wasm-js.bin"
 GLUE="$UPSTREAM_DIR/compiler-host/src/main/js/worker-glue.js"
-for file in "$WEB/kotlin-compiler.js" "$WEB/kotlin-compiler.js.wasm" "$STDLIB" "$GLUE"; do
+if [ "$TARGET" = js ]; then
+  WEB="$UPSTREAM_DIR/compiler-host/build/jsImage"
+  IMAGE="$WEB/kotlin-compiler-js.js"
+  WASM="$WEB/kotlin-compiler-js.js.wasm"
+  STDLIB="$UPSTREAM_DIR/compiler-host/build/stdlib-js/kotlin-stdlib-js.bin"
+  STDLIB_NAME="kotlin-stdlib-js.bin"
+  TASKS_JSON='[":compiler-host:jsJvmScenario", ":compiler-host:jsWebImage"]'
+else
+  WEB="$UPSTREAM_DIR/compiler-host/build/webImage"
+  IMAGE="$WEB/kotlin-compiler.js"
+  WASM="$WEB/kotlin-compiler.js.wasm"
+  STDLIB="$UPSTREAM_DIR/compiler-host/build/stdlib/kotlin-stdlib-wasm-js.bin"
+  STDLIB_NAME="kotlin-stdlib-wasm-js.bin"
+  TASKS_JSON='[":compiler-host:stdlibArchive", ":compiler-host:webImage"]'
+fi
+
+for file in "$IMAGE" "$WASM" "$STDLIB" "$GLUE"; do
   if [ ! -f "$file" ]; then
     echo "missing build output: $file" >&2
     exit 1
@@ -113,9 +153,9 @@ done
 
 rm -rf "$DIST"
 mkdir -p "$DIST"
-cat "$WEB/kotlin-compiler.js" "$GLUE" > "$DIST/kotlin-compiler-worker.js"
-cp "$WEB/kotlin-compiler.js.wasm" "$DIST/kotlin-compiler-worker.js.wasm"
-cp "$STDLIB" "$DIST/kotlin-stdlib-wasm-js.bin"
+cat "$IMAGE" "$GLUE" > "$DIST/kotlin-compiler-worker.js"
+cp "$WASM" "$DIST/kotlin-compiler-worker.js.wasm"
+cp "$STDLIB" "$DIST/$STDLIB_NAME"
 # The upstream smoke test requires this file from a directory that may sit under
 # a "type": "module" package.
 printf '{"type":"commonjs"}\n' > "$DIST/package.json"
@@ -132,23 +172,26 @@ cat > "$DIST/build-info.json" <<EOF
   },
   "graalvm": "${GRAALVM_VERSION}",
   "binaryen": "${BINARYEN_VERSION}",
-  "tasks": [
-    ":compiler-host:stdlibArchive",
-    ":compiler-host:webImage"
-  ],
+  "tasks": ${TASKS_JSON},
   "heap": "${HEAP}",
   "built": "${BUILT}"
 }
 EOF
 
-if command -v node >/dev/null 2>&1; then
+if [ "$TARGET" = wasm ] && command -v node >/dev/null 2>&1; then
   echo "smoke testing the image under Node..."
   node --experimental-wasm-exnref \
     "$UPSTREAM_DIR/compiler-host/src/test/js/image-test.cjs" "$DIST"
-else
+elif [ "$TARGET" = js ]; then
+  echo "JS image built; run npm test after vendoring"
+elif ! command -v node >/dev/null 2>&1; then
   echo "node not found; skipping the image smoke test (run npm test after vendoring)"
 fi
 
 echo
 echo "compilerDist: $DIST"
-echo "vendor: node scripts/toolchain.mjs vendor --compiler-dist \"$DIST\""
+if [ "$TARGET" = js ]; then
+  echo "vendor: node scripts/toolchain.mjs vendor --target js --compiler-dist \"$DIST\""
+else
+  echo "vendor: node scripts/toolchain.mjs vendor --compiler-dist \"$DIST\""
+fi

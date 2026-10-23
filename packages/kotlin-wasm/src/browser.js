@@ -1,6 +1,6 @@
 import { COMPILER_VERSION } from './language.js';
 import { KotlinUnsupportedError, KotlinWasmError } from './errors.js';
-import { buildResult, compileFailureResult } from './output.js';
+import { buildResult, compileFailureResult, formatDiagnostics } from './output.js';
 import { JS_STDIN_HOOK, prepareSource, splitLines } from './prelude.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
@@ -31,7 +31,9 @@ function resolveBaseUrl(options) {
   }
   const base = typeof document !== 'undefined' ? document.baseURI : globalThis.location?.href;
   const url = new URL(String(options.baseUrl), base);
-  return url.href.endsWith('/') ? url.href : `${url.href}/`;
+  let href = url.href.endsWith('/') ? url.href : `${url.href}/`;
+  if (options.target === 'js' && !href.endsWith('/js/')) href = new URL('js/', href).href;
+  return href;
 }
 
 // A classic Worker must be same-origin; assets are often on a CDN. Fetch the
@@ -240,7 +242,48 @@ function releaseRecord(record, onProgress) {
   for (const url of record.blobUrls) URL.revokeObjectURL(url);
 }
 
-async function runInWorker(record, { source, timeoutMs, input }) {
+function decodeAnswerFiles(files, target) {
+  const decoder = new TextDecoder();
+  return (files || []).map((file) => {
+    const bytes = Uint8Array.from(atob(file.content || ''), (c) => c.charCodeAt(0));
+    return target === 'js'
+      ? { name: file.name, content: decoder.decode(bytes), encoding: 'utf8' }
+      : { name: file.name, content: file.content, encoding: 'base64' };
+  });
+}
+
+async function compileInWorker(record, { source, fileName, target, compileTimeoutMs }) {
+  const answer = await record.request(
+    'compile',
+    source,
+    '',
+    Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS
+  );
+  if (answer?.error) throw new KotlinWasmError(answer.error);
+  const compileMs = Number(answer?.milliseconds) || 0;
+  if (!answer?.ok) {
+    return {
+      ok: false,
+      target,
+      compilerVersion: COMPILER_VERSION,
+      fileName,
+      compileMs,
+      errors: formatDiagnostics(answer.diagnostics, source, fileName),
+      files: []
+    };
+  }
+  return {
+    ok: true,
+    target,
+    compilerVersion: COMPILER_VERSION,
+    fileName,
+    compileMs,
+    errors: [],
+    files: decodeAnswerFiles(answer.files, target)
+  };
+}
+
+async function runInWorker(record, { source, timeoutMs, input, target }) {
   const answer = await record.request('compile', source, '');
   if (answer?.error) throw new KotlinWasmError(answer.error);
 
@@ -250,13 +293,69 @@ async function runInWorker(record, { source, timeoutMs, input }) {
   }
 
   const chunks = [];
-  const outcome = await runCompiledProgram(
-    answer.files,
-    (chunk) => chunks.push(chunk),
-    timeoutMs,
-    input
-  );
+  const outcome = target === 'js'
+    ? await runCompiledJs(answer.files, (chunk) => chunks.push(chunk), timeoutMs)
+    : await runCompiledProgram(
+        answer.files,
+        (chunk) => chunks.push(chunk),
+        timeoutMs,
+        input
+      );
   return { answer, compileMs, chunks, ...outcome };
+}
+
+async function runCompiledJs(files, onChunk, timeoutMs) {
+  const file =
+    (files || []).find((entry) => entry.name === 'main.mjs') ||
+    (files || []).find((entry) => /\.m?js$/.test(entry.name));
+  if (!file) throw new KotlinWasmError('The Kotlin compiler did not emit a JavaScript module.');
+  const source = new TextDecoder().decode(
+    Uint8Array.from(atob(file.content || ''), (c) => c.charCodeAt(0))
+  );
+  const urls = [];
+  const blob = (content, type) => {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    urls.push(url);
+    return url;
+  };
+  const main = blob(source, 'text/javascript');
+  const runner = blob(
+    `
+    globalThis.write = (message) => postMessage({ output: String(message), stream: 'stdout', newline: false });
+    const out = (...values) => postMessage({ output: values.map(String).join(' '), stream: 'stdout', newline: true });
+    const err = (...values) => postMessage({ output: values.map(String).join(' '), stream: 'stderr', newline: true });
+    console.log = out; console.info = out; console.debug = out;
+    console.warn = err; console.error = err;
+    try { await import(${JSON.stringify(main)}); postMessage({ done: true }); }
+    catch (error) { postMessage({ done: true, error: String(error && error.stack || error) }); }
+    `,
+    'text/javascript'
+  );
+
+  const started = performance.now();
+  return new Promise((resolve) => {
+    const worker = new Worker(runner, { type: 'module', name: 'kotlin-program' });
+    let settled = false;
+    const finish = (outcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker.terminate();
+      for (const url of urls) URL.revokeObjectURL(url);
+      resolve({ ...outcome, runMs: performance.now() - started });
+    };
+    const timer = setTimeout(
+      () => finish({ timedOut: true, timeoutMs }),
+      timeoutMs
+    );
+    worker.onmessage = ({ data }) => {
+      if (!data || typeof data !== 'object') return;
+      if (data.done) finish({ runtimeError: data.error || null });
+      else onChunk({ text: data.output, stream: data.stream, newline: data.newline });
+    };
+    worker.onerror = (event) =>
+      finish({ runtimeError: event.message || 'The Kotlin program worker failed to start.' });
+  });
 }
 
 async function runCompiledProgram(files, onChunk, timeoutMs, input = '') {
@@ -330,6 +429,7 @@ async function runCompiledProgram(files, onChunk, timeoutMs, input = '') {
 
 export async function createBrowserEngine(options = {}) {
   assertBrowser();
+  const target = options.target === 'js' ? 'js' : 'wasm';
   const baseUrl = resolveBaseUrl(options);
   const record = await acquireRecord(baseUrl, options.onProgress);
 
@@ -345,9 +445,21 @@ export async function createBrowserEngine(options = {}) {
     capabilities: {
       language: 'kotlin',
       compiler: COMPILER_VERSION,
-      stdin: true,
+      target,
+      stdin: target === 'wasm',
       wasmGc: true,
+      programWasmGc: target === 'wasm',
       analysis: false
+    },
+
+    async compile({ code, fileName, compileTimeoutMs }) {
+      if (disposed) throw new Error('This compiler has been disposed.');
+      return compileInWorker(record, {
+        source: code,
+        fileName,
+        target,
+        compileTimeoutMs
+      });
     },
 
     async warm() {
@@ -357,11 +469,12 @@ export async function createBrowserEngine(options = {}) {
     async run({ code, input, fileName, timeoutMs }) {
       if (disposed) throw new Error('This compiler has been disposed.');
       const runTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS;
-      const prepared = prepareSource(code, input);
+      const prepared = target === 'js' ? { source: code, mapOffset: 0 } : prepareSource(code, input);
       const outcome = await runInWorker(record, {
         source: prepared.source,
         timeoutMs: runTimeout,
-        input
+        input,
+        target
       });
       if (outcome.answer && !outcome.answer.ok) {
         return compileFailureResult(outcome.answer, code, fileName, prepared.mapOffset);

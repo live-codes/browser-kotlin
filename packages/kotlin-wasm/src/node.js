@@ -6,12 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 import { COMPILER_VERSION } from './language.js';
 import { KotlinUnsupportedError, KotlinWasmError } from './errors.js';
-import { buildResult, compileFailureResult } from './output.js';
+import { buildResult, compileFailureResult, formatDiagnostics } from './output.js';
 import { prepareSource, splitLines } from './prelude.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_COMPILE_TIMEOUT_MS = 180000;
 const PACKAGED = fileURLToPath(new URL('../assets/', import.meta.url));
+const PACKAGED_JS = fileURLToPath(new URL('../assets/js/', import.meta.url));
 const WORKER = fileURLToPath(new URL('./node/compiler-worker.mjs', import.meta.url));
 
 const records = new Map();
@@ -111,9 +112,17 @@ async function hostedAssets(baseUrl, onProgress) {
   }
 }
 
-async function resolveAssets(options) {
-  if (!options.baseUrl) return { dir: PACKAGED, cleanup: async () => {} };
-  return hostedAssets(options.baseUrl, options.onProgress);
+function targetBase(baseUrl, target) {
+  let root = String(baseUrl);
+  if (!root.endsWith('/')) root += '/';
+  if (target === 'js' && !root.endsWith('/js/')) root += 'js/';
+  return root;
+}
+
+async function resolveAssets(options, target) {
+  const packed = target === 'js' ? PACKAGED_JS : PACKAGED;
+  if (!options.baseUrl) return { dir: packed, cleanup: async () => {} };
+  return hostedAssets(targetBase(options.baseUrl, target), options.onProgress);
 }
 
 async function createRecord(assets, onProgress) {
@@ -325,6 +334,63 @@ function runOnRecord(record, { source, inputLines, fileName, timeoutMs, compileT
   });
 }
 
+function compileOnRecord(record, { source, fileName, compileTimeoutMs }) {
+  return withLock(record, () => {
+    if (record.dead) throw record.failure || new KotlinWasmError('The Kotlin worker is not running.');
+    return new Promise((resolve, reject) => {
+      const id = record.nextId++;
+      const timer = setTimeout(() => {
+        record.pending.delete(id);
+        stopRecord(
+          record,
+          `The Kotlin compiler did not answer within ${Math.round(compileTimeoutMs / 1000)} s.`
+        );
+        reject(
+          new KotlinWasmError(
+            `The Kotlin compiler did not answer within ${Math.round(compileTimeoutMs / 1000)} s.`
+          )
+        );
+      }, compileTimeoutMs);
+      record.pending.set(id, {
+        chunks: [],
+        onDone: (data) => {
+          clearTimeout(timer);
+          if (data.type === 'error') {
+            reject(new KotlinWasmError(data.message || 'The Kotlin compilation failed.'));
+            return;
+          }
+          if (data.type === 'result') {
+            if (data.result?.error) {
+              reject(new KotlinWasmError(data.result.error));
+              return;
+            }
+            resolve({
+              answer: data.result.answer,
+              compileMs: Number(data.result.compileMs) || 0
+            });
+            return;
+          }
+          reject(new KotlinWasmError('The Kotlin worker sent an unexpected message.'));
+        }
+      });
+      record.worker.postMessage({ type: 'compile', id, source, fileName });
+    });
+  });
+}
+
+function decodeAnswerFiles(files, target) {
+  return (files || []).map((file) => {
+    if (target === 'js') {
+      return {
+        name: file.name,
+        content: Buffer.from(file.content || '', 'base64').toString('utf8'),
+        encoding: 'utf8'
+      };
+    }
+    return { name: file.name, content: file.content, encoding: 'base64' };
+  });
+}
+
 function warmRecord(record) {
   return withLock(record, () => {
     if (record.dead) throw record.failure || new KotlinWasmError('The Kotlin worker is not running.');
@@ -349,7 +415,8 @@ function warmRecord(record) {
 
 export async function createNodeEngine(options = {}) {
   assertNode();
-  const assets = await resolveAssets(options);
+  const target = options.target === 'js' ? 'js' : 'wasm';
+  const assets = await resolveAssets(options, target);
   let record = await acquireRecord(assets, options.onProgress);
 
   const getRecord = async () => {
@@ -364,9 +431,45 @@ export async function createNodeEngine(options = {}) {
     capabilities: {
       language: 'kotlin',
       compiler: COMPILER_VERSION,
-      stdin: true,
+      target,
+      stdin: target === 'wasm',
       wasmGc: true,
+      programWasmGc: target === 'wasm',
       analysis: false
+    },
+
+    async compile({ code, fileName, compileTimeoutMs }) {
+      if (disposed) throw new Error('This compiler has been disposed.');
+      const compileTimeout =
+        Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS;
+      const current = await getRecord();
+      const outcome = await compileOnRecord(current, {
+        source: code,
+        fileName,
+        compileTimeoutMs: compileTimeout
+      });
+      const answer = outcome.answer;
+      const compileMs = outcome.compileMs;
+      if (!answer?.ok) {
+        return {
+          ok: false,
+          target,
+          compilerVersion: COMPILER_VERSION,
+          fileName,
+          compileMs,
+          errors: formatDiagnostics(answer?.diagnostics, code, fileName),
+          files: []
+        };
+      }
+      return {
+        ok: true,
+        target,
+        compilerVersion: COMPILER_VERSION,
+        fileName,
+        compileMs,
+        errors: [],
+        files: decodeAnswerFiles(answer.files, target)
+      };
     },
 
     async warm() {
@@ -379,7 +482,7 @@ export async function createNodeEngine(options = {}) {
       const runTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS;
       const compileTimeout =
         Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS;
-      const prepared = prepareSource(code, input);
+      const prepared = target === 'js' ? { source: code, mapOffset: 0 } : prepareSource(code, input);
       const current = await getRecord();
       const outcome = await runOnRecord(current, {
         source: prepared.source,

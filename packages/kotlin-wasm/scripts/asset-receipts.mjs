@@ -1,5 +1,5 @@
-// Regenerates src/asset-receipts.js, and checks that the shipped gzip parts
-// still inflate to the compiler/stdlib the manifest pins.
+// Regenerates src/asset-receipts.js, and checks that both targets' gzip parts
+// still inflate to the compiler/stdlib their manifests pin.
 //
 //   npm run assets
 import { createHash } from 'node:crypto';
@@ -10,83 +10,125 @@ import { gunzipSync } from 'node:zlib';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const assets = join(root, 'assets');
+const jsAssets = join(assets, 'js');
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
-const names = (await readdir(assets, { withFileTypes: true }))
-  .filter((entry) => entry.isFile() && entry.name !== 'README.md')
-  .map((entry) => entry.name)
-  .sort();
-
-const receipts = {};
-for (const name of names) {
-  const bytes = await readFile(join(assets, name));
-  receipts[name] = { bytes: bytes.byteLength, sha256: sha256(bytes) };
+async function collectReceipts(dir) {
+  const names = (await readdir(dir, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name !== 'README.md')
+    .map((entry) => entry.name)
+    .sort();
+  const receipts = {};
+  for (const name of names) {
+    const bytes = await readFile(join(dir, name));
+    receipts[name] = { bytes: bytes.byteLength, sha256: sha256(bytes) };
+  }
+  return receipts;
 }
 
+async function validate({ label, dir, receipts, manifest, expected, pins }) {
+  if (!expected) throw new Error(`toolchain.lock.json has no ${label}.assets block`);
+  const parts = [];
+  for (const name of manifest.compiler.parts) {
+    parts.push(await readFile(join(dir, name)));
+  }
+  const compiler = Buffer.concat(parts);
+  const wasm = gunzipSync(compiler);
+  const stdlib = gunzipSync(await readFile(join(dir, manifest.stdlib.file)));
+
+  if (compiler.byteLength !== manifest.compiler.gzBytes) {
+    throw new Error(`${label}: compiler parts are ${compiler.byteLength} bytes, manifest says ${manifest.compiler.gzBytes}`);
+  }
+  if (wasm.byteLength !== manifest.compiler.rawBytes || sha256(wasm) !== manifest.compiler.rawSha256) {
+    throw new Error(`${label}: the compiler parts do not inflate to the pinned compiler image`);
+  }
+  if (stdlib.byteLength !== manifest.stdlib.rawBytes || sha256(stdlib) !== manifest.stdlib.rawSha256) {
+    throw new Error(`${label}: the stdlib archive does not inflate to the pinned stdlib`);
+  }
+  if (
+    expected.compilerImage.gzBytes !== manifest.compiler.gzBytes ||
+    expected.compilerImage.rawBytes !== manifest.compiler.rawBytes ||
+    expected.compilerImage.rawSha256 !== manifest.compiler.rawSha256
+  ) {
+    throw new Error(`${label}: toolchain.lock.json and kotlin-assets.json disagree about the compiler image`);
+  }
+  if (
+    expected.stdlib.gzBytes !== manifest.stdlib.gzBytes ||
+    expected.stdlib.file !== manifest.stdlib.file ||
+    expected.stdlib.rawBytes !== manifest.stdlib.rawBytes ||
+    expected.stdlib.rawSha256 !== manifest.stdlib.rawSha256
+  ) {
+    throw new Error(`${label}: toolchain.lock.json and kotlin-assets.json disagree about the stdlib`);
+  }
+  for (const part of expected.compilerImage.gzParts || []) {
+    const receipt = receipts[part.file];
+    if (!receipt || receipt.bytes !== part.bytes || receipt.sha256 !== part.sha256) {
+      throw new Error(`${label}: toolchain.lock.json does not match the shipped part ${part.file}`);
+    }
+  }
+  for (const [key, file] of [
+    ['generatedHost', 'kotlin-compiler-image.js'],
+    ['wrapper', 'kotlin-compiler-worker.js'],
+    ['manifest', 'kotlin-assets.json']
+  ]) {
+    const pinned = pins[key];
+    const receipt = receipts[file];
+    if (!pinned || !receipt || pinned.bytes !== receipt.bytes || pinned.sha256 !== receipt.sha256) {
+      throw new Error(`${label}: toolchain.lock.json does not match ${file}`);
+    }
+  }
+  return { manifest };
+}
+
+const receipts = await collectReceipts(assets);
 const manifest = JSON.parse(await readFile(join(assets, 'kotlin-assets.json'), 'utf8'));
-const compiler = Buffer.concat(
-  await Promise.all(manifest.compiler.parts.map((name) => readFile(join(assets, name))))
-);
-const wasm = gunzipSync(compiler);
-const stdlib = gunzipSync(await readFile(join(assets, manifest.stdlib.file)));
-
-if (compiler.byteLength !== manifest.compiler.gzBytes) {
-  throw new Error(
-    `compiler parts are ${compiler.byteLength} bytes, manifest says ${manifest.compiler.gzBytes}`
-  );
-}
-if (wasm.byteLength !== manifest.compiler.rawBytes || sha256(wasm) !== manifest.compiler.rawSha256) {
-  throw new Error('the compiler parts do not inflate to the pinned compiler image');
-}
-if (stdlib.byteLength !== manifest.stdlib.rawBytes || sha256(stdlib) !== manifest.stdlib.rawSha256) {
-  throw new Error('the stdlib archive does not inflate to the pinned stdlib');
+let jsReceipts = {};
+let jsManifest = null;
+try {
+  jsManifest = JSON.parse(await readFile(join(jsAssets, 'kotlin-assets.json'), 'utf8'));
+  jsReceipts = await collectReceipts(jsAssets);
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
 }
 
 const lock = JSON.parse(await readFile(join(root, 'toolchain.lock.json'), 'utf8'));
-const expected = lock.compiler?.assets;
-if (!expected) throw new Error('toolchain.lock.json has no compiler.assets block');
-if (
-  expected.compilerImage.gzBytes !== manifest.compiler.gzBytes ||
-  expected.compilerImage.rawBytes !== manifest.compiler.rawBytes ||
-  expected.compilerImage.rawSha256 !== manifest.compiler.rawSha256
-) {
-  throw new Error('toolchain.lock.json and kotlin-assets.json disagree about the compiler image');
-}
-if (
-  expected.stdlib.gzBytes !== manifest.stdlib.gzBytes ||
-  expected.stdlib.file !== manifest.stdlib.file ||
-  expected.stdlib.rawBytes !== manifest.stdlib.rawBytes ||
-  expected.stdlib.rawSha256 !== manifest.stdlib.rawSha256
-) {
-  throw new Error('toolchain.lock.json and kotlin-assets.json disagree about the stdlib');
-}
-for (const part of expected.compilerImage.gzParts || []) {
-  const receipt = receipts[part.file];
-  if (!receipt || receipt.bytes !== part.bytes || receipt.sha256 !== part.sha256) {
-    throw new Error(`toolchain.lock.json does not match the shipped part ${part.file}`);
-  }
-}
-for (const [key, file] of [
-  ['generatedHost', 'kotlin-compiler-image.js'],
-  ['wrapper', 'kotlin-compiler-worker.js'],
-  ['manifest', 'kotlin-assets.json']
-]) {
-  const pinned = lock[key];
-  const receipt = receipts[file];
-  if (!pinned || !receipt || pinned.bytes !== receipt.bytes || pinned.sha256 !== receipt.sha256) {
-    throw new Error(`toolchain.lock.json does not match ${file}`);
-  }
+await validate({
+  label: 'compiler',
+  dir: assets,
+  receipts,
+  manifest,
+  expected: lock.compiler?.assets,
+  pins: lock
+});
+if (jsManifest) {
+  await validate({
+    label: 'javascript',
+    dir: jsAssets,
+    receipts: jsReceipts,
+    manifest: jsManifest,
+    expected: lock.javascript?.assets,
+    pins: lock.javascript
+  });
 }
 
 const source = `// Generated by scripts/asset-receipts.mjs. Do not edit.
 // SHA-256 and byte sizes of every file shipped in assets/.
 export const ASSET_RECEIPTS = ${JSON.stringify(receipts, null, 2)};
+export const JS_ASSET_RECEIPTS = ${JSON.stringify(jsReceipts, null, 2)};
 `;
 await writeFile(join(root, 'src', 'asset-receipts.js'), source);
 
 for (const [name, receipt] of Object.entries(receipts)) {
   console.log(`${receipt.sha256}  ${String(receipt.bytes).padStart(10)}  ${name}`);
 }
+for (const [name, receipt] of Object.entries(jsReceipts)) {
+  console.log(`${receipt.sha256}  ${String(receipt.bytes).padStart(10)}  js/${name}`);
+}
 console.log(
   `compiler: ${manifest.compiler.rawBytes} bytes inflated; stdlib: ${manifest.stdlib.rawBytes} bytes inflated`
 );
+if (jsManifest) {
+  console.log(
+    `js compiler: ${jsManifest.compiler.rawBytes} bytes inflated; stdlib: ${jsManifest.stdlib.rawBytes} bytes inflated`
+  );
+}

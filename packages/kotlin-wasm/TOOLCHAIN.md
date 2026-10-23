@@ -1,9 +1,15 @@
 # Building the real Kotlin compiler image
 
 This package does not need a prebuilt compiler image. The scripts in this
-directory build the compiler host and the Kotlin/Wasm standard library from
+directory build the compiler host from
 [`alex28sh/wasm-code-editor`](https://github.com/alex28sh/wasm-code-editor),
 using Oracle GraalVM Web Image, and vendor the result into `assets/`.
+
+There are two targets:
+
+- **`wasm`** (default): the Kotlin/Wasm compiler backend and the Wasm stdlib.
+- **`js`**: the Kotlin/JS backend and the Kotlin/JS stdlib. The emitted program
+  is a standalone `main.mjs`; the compiler itself is still a GraalVM image.
 
 The Analysis API image is deliberately **not** built. This package compiles and
 runs Kotlin; inline completion/diagnostics from the Analysis API are out of
@@ -16,9 +22,13 @@ scope. That halves the build and avoids the 28 GB-heap image.
 | `kotlin-compiler.js` | `:compiler-host:webImage` | `assets/kotlin-compiler-image.js` |
 | `kotlin-compiler.js.wasm` | `:compiler-host:webImage` | gzipped and split into `assets/kotlin-compiler-worker.js.wasm.gz.*` |
 | `kotlin-stdlib-wasm-js.bin` | `:compiler-host:stdlibArchive` | `assets/kotlin-stdlib-wasm-js.bin.gz` |
+| `kotlin-compiler-js.js` | `:compiler-host:jsWebImage` | `assets/js/kotlin-compiler-image.js` |
+| `kotlin-compiler-js.js.wasm` | `:compiler-host:jsWebImage` | gzipped and split into `assets/js/kotlin-compiler-worker.js.wasm.gz.*` |
+| `kotlin-stdlib-js.bin` | `:compiler-host:jsStdlibArchive` | `assets/js/kotlin-stdlib-js.bin.gz` |
 
-`webImage` depends on `patchJars`, `argumentsMetadata` and `jvmScenario`; those
-tasks run automatically. The compiler worker is assembled as:
+`webImage` depends on `patchJars`, `argumentsMetadata` and `jvmScenario`;
+`jsWebImage` depends on the same plus `jsJvmScenario` and `jsStdlibArchive`.
+Those tasks run automatically. The compiler worker is assembled as:
 
 ```text
 kotlin-compiler.js + compiler-host/src/main/js/worker-glue.js
@@ -51,8 +61,15 @@ From `packages/kotlin-wasm`:
 
 ```sh
 bash scripts/fetch-toolchain.sh --accept-license
+
+# Wasm target (default)
 HEAP=8g GRADLE_HEAP=1024m GRADLE_WORKERS=2 bash scripts/build-toolchain.sh
 node scripts/toolchain.mjs vendor --compiler-dist .toolchain/compilerDist
+
+# JS target
+TARGET=js HEAP=8g GRADLE_HEAP=1024m GRADLE_WORKERS=2 bash scripts/build-toolchain.sh
+node scripts/toolchain.mjs vendor --target js --compiler-dist .toolchain/js-compilerDist
+
 npm test
 ```
 
@@ -82,11 +99,17 @@ WORK_DIR="$HOME/kotlin-wasm-build" \
 DIST_DIR="/mnt/d/DevWork/live-codes/browser-kotlin/packages/kotlin-wasm/.toolchain/compilerDist" \
 HEAP=8g GRADLE_HEAP=1024m GRADLE_WORKERS=2 \
 bash scripts/build-toolchain.sh
+
+# JS target, with the output on the Windows filesystem for vendoring
+TARGET=js WORK_DIR="$HOME/kotlin-wasm-build" \
+DIST_DIR="/mnt/d/DevWork/live-codes/browser-kotlin/packages/kotlin-wasm/.toolchain/js-compilerDist" \
+HEAP=8g GRADLE_HEAP=1024m GRADLE_WORKERS=2 \
+bash scripts/build-toolchain.sh
 ```
 
-The build script prints the staging directory. It runs the upstream
-`image-test.cjs` if Node is available; otherwise run the package tests after
-vendoring.
+The build script prints the staging directory. For the Wasm target it runs the
+upstream `image-test.cjs` if Node is available; the JS target is covered by
+`npm test` and `example/js.html` after vendoring.
 
 ## What the build script changes
 
@@ -104,16 +127,30 @@ The upstream checkout is disposable and is reset before every build. The script:
    execution and runs Kotlin compilation in-process to keep the memory ceiling.
 5. Optionally replaces the `kotlin = "..."` version in
    `gradle/libs.versions.toml` when `KOTLIN_VERSION` is set.
-6. Runs:
+6. For `TARGET=js`, copies `scripts/js-target/JsCompilerHost.kt`,
+   `JsJvmScenario.kt` and `WebMainJs.java` into the checkout, and appends
+   `scripts/js-target/js-target.gradle.kts`. That adds the JS stdlib, scenario
+   and `jsWebImage` tasks.
+7. Runs the target's Gradle tasks:
 
    ```sh
+   # wasm
    bash gradlew --no-daemon --max-workers="$GRADLE_WORKERS" --console=plain \
      :compiler-host:stdlibArchive :compiler-host:webImage
+
+   # js
+   bash gradlew --no-daemon --max-workers="$GRADLE_WORKERS" --console=plain \
+     -PjsImage.heap="$HEAP" :compiler-host:jsWebImage
    ```
 
-7. Assembles `.toolchain/compilerDist` and writes `build-info.json` with the
+8. Assembles `.toolchain/compilerDist` (Wasm) or
+   `.toolchain/js-compilerDist` (JS) and writes `build-info.json` with the
    Kotlin version, upstream repository/commit, GraalVM and Binaryen versions,
    task list, heap and UTC build timestamp.
+
+For the JS target, the image is still a GraalVM Web Image; the emitted program
+is JavaScript. The JS compiler image is ~75 MB raw / ~29.3 MB gz, and the JS
+stdlib archive is ~10.5 MB raw / ~3.3 MB gz.
 
 Do not use `:compiler-host:compilerDist` for this package: it depends on both
 `webImage` and the 75 MB `analysisImage`, and would need the 28 GB-heap build.
@@ -122,6 +159,7 @@ Do not use `:compiler-host:compilerDist` for this package: it depends on both
 
 ```sh
 node scripts/toolchain.mjs vendor --compiler-dist .toolchain/compilerDist
+node scripts/toolchain.mjs vendor --target js --compiler-dist .toolchain/js-compilerDist
 node scripts/toolchain.mjs check
 npm test
 ```
@@ -136,6 +174,10 @@ npm test
   records every part's SHA-256),
 - updates `COMPILER_VERSION` in `src/language.js`,
 - regenerates `src/asset-receipts.js` and validates the result.
+
+With `--target js`, the same steps write `assets/js/`, the JS stdlib and a
+`javascript` block in `toolchain.lock.json`. The JS compiler image is a
+GraalVM image too; only the emitted program is JavaScript.
 
 You can vendor an upstream `:compiler-host:compilerDist` with
 `--compiler-dist <dir>`, or let the script assemble from a build directory:
@@ -157,6 +199,8 @@ node scripts/toolchain.mjs vendor \
    ```sh
    KOTLIN_VERSION=2.6.0 HEAP=8g GRADLE_HEAP=1024m GRADLE_WORKERS=2 \
      bash scripts/build-toolchain.sh
+   KOTLIN_VERSION=2.6.0 TARGET=js HEAP=8g GRADLE_HEAP=1024m GRADLE_WORKERS=2 \
+     bash scripts/build-toolchain.sh
    ```
 
    If the Kotlin compiler's internals changed, update the upstream host first
@@ -168,15 +212,16 @@ node scripts/toolchain.mjs vendor \
 
    The script fails loudly if the upstream heap or unsafe-memory lines changed,
    so the patches cannot silently drift.
-3. Vendor the result and run the full suite:
+3. Vendor both results and run the full suite:
 
    ```sh
    node scripts/toolchain.mjs vendor --compiler-dist .toolchain/compilerDist
+   node scripts/toolchain.mjs vendor --target js --compiler-dist .toolchain/js-compilerDist
    npm test
-   node ../../serve.mjs 8001   # browser smoke test
+   node ../../serve.mjs 8001   # browser smoke tests (example/ and example/js.html)
    ```
 
-4. Commit `assets/`, `src/language.js`, `src/asset-receipts.js` and
+4. Commit `assets/`, `assets/js/`, `src/language.js`, `src/asset-receipts.js` and
    `toolchain.lock.json` together. Update `FINDINGS.md`, `README.md`,
    `assets/README.md` and `THIRD-PARTY-NOTICES.md` if the version, sizes or
    provenance changed.
@@ -184,12 +229,13 @@ node scripts/toolchain.mjs vendor \
 ### Upgrade checklist
 
 - [ ] chosen Kotlin version / upstream commit
-- [ ] `scripts/build-toolchain.sh` completed
-- [ ] upstream image smoke test passed (or package tests passed)
-- [ ] `scripts/toolchain.mjs vendor` completed
+- [ ] `scripts/build-toolchain.sh` completed for `wasm`
+- [ ] `TARGET=js scripts/build-toolchain.sh` completed
+- [ ] upstream image smoke test or package tests passed
+- [ ] `scripts/toolchain.mjs vendor` completed for both targets
 - [ ] `scripts/toolchain.mjs check` passes
-- [ ] `npm test` passes
-- [ ] browser example compiles and runs
+- [ ] `npm test` passes (Wasm and JS)
+- [ ] browser examples compile and run (`example/` and `example/js.html`)
 - [ ] `toolchain.lock.json` and `src/asset-receipts.js` are committed
 - [ ] docs/notices updated if required
 
@@ -207,9 +253,19 @@ node scripts/toolchain.mjs vendor \
     "graalvm": "native-image 25.0.4 ...",
     "binaryen": "wasm-as version 133 ...",
     "tasks": [":compiler-host:stdlibArchive", ":compiler-host:webImage"],
-    "heap": "6g",
+    "heap": "8g",
     "built": "2026-..."
   }
+},
+"javascript": {
+  "version": "2.5.0-dev-9169",
+  "host": { "repository": "...", "commit": "..." },
+  "build": {
+    "tasks": [":compiler-host:jsJvmScenario", ":compiler-host:jsWebImage"],
+    "heap": "8g",
+    "built": "2026-..."
+  },
+  "assets": { "...": "same shape as compiler.assets" }
 }
 ```
 
@@ -222,12 +278,13 @@ Building the image yourself improves provenance but does not change the
 licences:
 
 - This package's own code is Apache-2.0, the same license as the Kotlin compiler.
-- The Kotlin compiler and the Kotlin/Wasm standard library are Apache-2.0.
-- The generated image and loader embed GraalVM runtime code and are governed by
-  the GraalVM Free Terms and Conditions (GFTC). The GFTC, Oracle's NOTICE and
-  the distribution's license-information manual are reproduced in
-  [`licenses/`](licenses/). Review those terms before redistributing the
-  committed assets.
+- The Kotlin compiler, the Kotlin/Wasm stdlib and the Kotlin/JS stdlib are
+  Apache-2.0.
+- Both generated images and loaders (Wasm and JS targets) embed GraalVM runtime
+  code and are governed by the GraalVM Free Terms and Conditions (GFTC). The
+  GFTC, Oracle's NOTICE and the distribution's license-information manual are
+  reproduced in [`licenses/`](licenses/). Review those terms before
+  redistributing the committed assets.
 - Binaryen is Apache-2.0 and is a build-time tool; it is not shipped.
 
 See [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md), [`LICENSE`](LICENSE),
@@ -256,5 +313,11 @@ Analysis API image.
 **`Filename too long` on Windows** — clone with
 `git -c core.longpaths=true clone ...`, or build in WSL.
 
-**Node test fails with a Wasm exception-handling error** — Node needs
-`--experimental-wasm-exnref`; `npm test` already passes it.
+**Node test fails with a Wasm exception-handling error** — the compiler image
+(for both targets) needs `--experimental-wasm-exnref`; `npm test` already passes
+it.
+
+**The JS target emits a klib instead of JavaScript** — the Kotlin/JS compiler
+needs the two-pass build: a klib, then `-Xinclude=<klib> -Xir-produce-js
+-module-kind es`. The `JsCompilerHost.kt` in `scripts/js-target/` does this; do
+not pass `-Xir-produce-js` without `-Xinclude`.
