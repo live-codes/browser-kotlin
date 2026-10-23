@@ -32,6 +32,7 @@
     "dist",
     "assets",
     "toolchain.lock.json",
+    "TOOLCHAIN.md",
     "THIRD-PARTY-NOTICES.md"
   ],
   "engines": {
@@ -40,6 +41,11 @@
   "scripts": {
     "build:iife": "node scripts/build-iife.mjs",
     "assets": "node scripts/asset-receipts.mjs",
+    "toolchain:check": "node scripts/toolchain.mjs check",
+    "toolchain:fetch": "bash scripts/fetch-toolchain.sh",
+    "toolchain:build": "bash scripts/build-toolchain.sh",
+    "toolchain:vendor": "node scripts/toolchain.mjs vendor",
+    "toolchain:plan": "node scripts/toolchain.mjs plan",
     "test": "node --experimental-wasm-exnref --test \"test/*.test.js\"",
     "prepack": "npm run build:iife",
     "prepublishOnly": "npm test"

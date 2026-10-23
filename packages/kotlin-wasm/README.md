@@ -7,6 +7,7 @@ anywhere.
 
 Source: <https://github.com/live-codes/browser-kotlin/tree/main/packages/kotlin-wasm>
 · [technical record](https://github.com/live-codes/browser-kotlin/blob/main/FINDINGS.md)
+· [build and upgrade process](TOOLCHAIN.md)
 
 ```js
 import { createCompiler } from '@live-codes/kotlin-wasm';
@@ -53,7 +54,7 @@ also compiles an empty program once, so the first user run is warm.
 | Option | Meaning |
 | --- | --- |
 | `baseUrl` | Where the runtime assets are served from. **Required in a browser**, optional in Node (the packaged assets are used). It may be relative to the page or an absolute http(s) URL. |
-| `onProgress` | `(value) => {}`, called with 0 to 1 while the ~30 MB of gzipped assets download. |
+| `onProgress` | `(value) => {}`, called with 0 to 1 while the ~32 MB of gzipped assets download. |
 | `fileName` | The name diagnostics use for the source. Defaults to `Main.kt`. |
 
 The returned object:
@@ -135,7 +136,7 @@ import {
 
 Import the module entry. `createCompiler` fetches the two small worker scripts,
 rewrites their asset URLs, and starts the compiler from Blob URLs, so `baseUrl`
-may be cross-origin (jsDelivr works). The wrapper then fetches the ~30 MB of
+may be cross-origin (jsDelivr works). The wrapper then fetches the ~32 MB of
 gzipped compiler/std lib assets itself and reports progress.
 
 ### Classic workers and the IIFE
@@ -154,7 +155,7 @@ const compiler = await self.kotlinWasm.createCompiler({
 script; it starts the compiler and the program in nested workers, so the host
 worker is never blocked by a running program.
 
-**The 30 MB compiler is split into two parts under 20 MB each**
+**The 28.5 MB compiler image is split into two parts under 20 MB each**
 (`kotlin-compiler-worker.js.wasm.gz.0` / `.1`) so jsDelivr, which refuses files
 over 20 MB, can host it. The wrapper concatenates and inflates them with
 `DecompressionStream`.
@@ -216,7 +217,7 @@ Program runs are tens of milliseconds.
 - **No Analysis API.** This package compiles and runs; inline diagnostics and
   completion from the real Analysis API are not included. (The upstream
   toolchain has a separate 75 MB image for that.)
-- **~30 MB gzipped / ~87 MB inflated** on first use, cached by the browser.
+- **~32 MB gzipped / ~85 MB inflated** on first use, cached by the browser.
   Lazy-load it only when a module actually uses Kotlin.
 - **WasmGC is required** — Chrome/Edge 119+, Firefox 120+, Safari 18.2+ — plus
   `DecompressionStream` and nested workers.
@@ -246,10 +247,13 @@ Program runs are tens of milliseconds.
 
 [`toolchain.lock.json`](toolchain.lock.json) pins the toolchain: Kotlin
 `2.5.0-dev-9169`, the compiler host
-`alex28sh/wasm-code-editor@02a8916`, the prebuilt image
-`space-enthusiast/kotlin-on-web-playground@5e5a40d`, the SHA-256 of every
-gzipped part and inflated archive. `npm run assets` fails if the assets and the
-lock disagree.
+`alex28sh/wasm-code-editor@02a8916`, the source build (Oracle GraalVM, Binaryen,
+heap and UTC timestamp), the SHA-256 of every gzipped part and inflated archive.
+`npm run assets` fails if the assets and the lock disagree.
+
+The committed image is built from source, not copied from another project. See
+[`TOOLCHAIN.md`](TOOLCHAIN.md) for the reproducible build and Kotlin upgrade
+procedure.
 
 ## Development
 
@@ -257,6 +261,8 @@ lock disagree.
 cd packages/kotlin-wasm
 npm install
 npm run assets          # regenerate receipts; verify assets and toolchain.lock.json
+npm run toolchain:check # print the pinned build provenance
+npm run toolchain:plan  # print the source-build/upgrade steps
 npm run build:iife      # rewrite dist/kotlin-wasm.global.js (committed)
 npm test                # real compiles in Node, with the exnref flag
 node ../../serve.mjs 8001
@@ -271,8 +277,9 @@ before copying, so a stale pairing fails there rather than on someone's page.
 ## Licence
 
 MIT for this package's own code, like the other LiveCodes wasm packages. The
-assets are third-party builds: the Kotlin compiler and Kotlin/Wasm standard
-library are Apache-2.0, and the GraalVM Web Image runtime carries Oracle
-GraalVM terms. See [`LICENSE`](LICENSE) and
+assets are built from the pinned upstream host: the Kotlin compiler and
+Kotlin/Wasm standard library are Apache-2.0, and the GraalVM Web Image runtime
+carries Oracle GraalVM terms. Building them here improves provenance but does
+not change those terms. See [`LICENSE`](LICENSE) and
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) for attribution, provenance
 and the redistribution caveat.

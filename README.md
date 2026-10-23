@@ -10,7 +10,7 @@ with no server and no build step:
 | Demo | Compiler | First load | Language |
 | --- | --- | ---: | --- |
 | [`index.html`](index.html) | [minikotlin](https://minikotlin.run) 0.1.0 — from-scratch C→Wasm compiler | ~2 MB | a tested Kotlin subset |
-| [`real.html`](real.html) | **real Kotlin 2.5.0-dev-9169 (K2)** via GraalVM Web Image | ~30 MB gz (~87 MB inflated) | real Kotlin + stdlib |
+| [`real.html`](real.html) | **real Kotlin 2.5.0-dev-9169 (K2)** via GraalVM Web Image | ~32 MB gz (~85 MB inflated) | real Kotlin + stdlib |
 
 Both emit **WasmGC**, instantiate it on the page, and stream `println` output.
 Nothing is sent anywhere.
@@ -29,10 +29,10 @@ block ES-module Workers and WebAssembly over `file://`; `serve.mjs` mainly adds
 `Content-Type: application/wasm`. Nothing is compiled server-side.
 
 The real compiler's image and stdlib are shipped gzipped: the compiler is split
-into two sub-20 MB parts (13.0 MB + 12.8 MB) plus a 3.8 MB stdlib archive. A
+into two sub-20 MB parts (14.25 MB + 14.25 MB) plus a 3.8 MB stdlib archive. A
 small worker wrapper concatenates and inflates them with `DecompressionStream`
-before the GraalVM loader uses them, so the browser transfers ~30 MB instead of
-~87 MB.
+before the GraalVM loader uses them, so the browser transfers ~32 MB instead of
+~85 MB.
 
 ```sh
 npm test                # Node smoke test for the minikotlin demo
@@ -104,8 +104,10 @@ The compiler is the **actual published Kotlin compiler**, ahead-of-time compiled
 to a GraalVM Web Image by
 [`alex28sh/wasm-code-editor`](https://github.com/alex28sh/wasm-code-editor)
 (`native-image --tool:svm-wasm`). The image embeds a JVM runtime compiled to
-wasm; no JVM is installed. The prebuilt image used here was published by
-[`space-enthusiast/kotlin-on-web-playground`](https://github.com/space-enthusiast/kotlin-on-web-playground).
+wasm; no JVM is installed. The committed image is built from the pinned upstream
+host with Oracle GraalVM Web Image by
+[`packages/kotlin-wasm/scripts/build-toolchain.sh`](packages/kotlin-wasm/scripts/build-toolchain.sh);
+see [`TOOLCHAIN.md`](packages/kotlin-wasm/TOOLCHAIN.md).
 
 `real.html` starts the classic worker
 `packages/kotlin-wasm/assets/kotlin-compiler-worker.js`.
@@ -138,7 +140,7 @@ for provenance and checksums.
 There are now two very different possible products:
 
 1. **Real K2** is the credible Kotlin language path: actual Kotlin and stdlib,
-   proper diagnostics, ~30 MB compressed first load (~87 MB inflated). Compile is
+   proper diagnostics, ~32 MB compressed first load (~85 MB inflated). Compile is
    ~1–2 s, which is usable for a Run button but not for per-keystroke analysis.
    The Analysis API can be added for completion/lint at the cost of another
    ~75 MB (compressible to roughly 25 MB).
@@ -148,31 +150,34 @@ There are now two very different possible products:
 Open items:
 
 - **The package's own code is MIT, like the other LiveCodes wasm packages; the
-  vendored assets are not cleared.** minikotlin publishes no licence; the
-  real-K2 image comes from a repo with no licence and embeds GraalVM runtime
-  code (Oracle GraalVM terms). Both are vendored for evaluation only — clear the
-  asset terms before shipping.
+  built assets are not cleared.** minikotlin publishes no licence; the real-K2
+  image is now built from the pinned upstream host, but it still embeds GraalVM
+  runtime code under Oracle GraalVM terms. Both are vendored for evaluation
+  only — clear the asset terms before shipping.
 - **The real compiler is single-file, stdlib-only.** No other libraries, no
   multi-file projects, no Gradle. The npm package supports pre-supplied
   line-based stdin (`readln`/`readlnOrNull`/`readLine`); the demo page does not
   expose an input panel. The upstream Analysis API is not included.
-- **Payload.** ~30 MB compressed (13.0 MB + 12.8 MB compiler parts + 3.8 MB
-  stdlib; ~87 MB after inflation), cached by the browser. The image and stdlib
+- **Payload.** ~32 MB compressed (14.25 MB + 14.25 MB compiler parts + 3.8 MB
+  stdlib; ~85 MB after inflation), cached by the browser. The image and stdlib
   are inflated in the worker with `DecompressionStream`; no server-side
   decompression is involved. LiveCodes should lazy-load it only when a snippet
   uses Kotlin.
 - **WasmGC is required** — Chrome/Edge 119+, Firefox 120+, Safari 18.2+. No
   feature detection yet; unsupported browsers fail at instantiation.
 - **Timeouts.** A program is stopped after 15 s in both demos.
-- **Reproducing the real image needs Oracle GraalVM 25.1+ Web Image and ~10 GB
-  free RAM per image** (the upstream build was given 24–28 GB heap). That is why
-  these images are vendored rather than built here.
+- **The real image is reproducible from source.** Oracle GraalVM Web Image and
+  Binaryen are required; the upstream defaults are 24 GB (compiler) and 28 GB
+  (Analysis API) heap. The committed compiler image was built with `HEAP=8g` in
+  a 12 GB WSL VM with 4 GB swap; 6 GB runs out of memory in the final image
+  stage. The exact process, upgrades and caveats are in
+  [`TOOLCHAIN.md`](packages/kotlin-wasm/TOOLCHAIN.md).
 
 ## Alternatives considered
 
 | Route | Verdict |
 | --- | --- |
-| Real K2 via GraalVM Web Image (this demo) | Genuine Kotlin, works; ~30 MB gz payload (~87 MB inflated), licensing to clear |
+| Real K2 via GraalVM Web Image (this demo) | Genuine Kotlin, built from source; ~32 MB gz payload (~85 MB inflated), licensing to clear |
 | minikotlin (this demo) | Works, tiny; subset language |
 | TeaVM + Kotlin class files | Back end proven (8/8 in `../browser-jvm/FINDINGS.md`), but no browser class-file front end exists |
 | Doppio JVM in JS | Compiles took 7–20 minutes; abandoned by `@live-codes/java-wasm` |

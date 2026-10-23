@@ -3,23 +3,23 @@
 export const ASSET_RECEIPTS = {
   "kotlin-assets.json": {
     "bytes": 467,
-    "sha256": "9b106ed2490ab2e2c1d6e3fb9013115b7b18d43a8d1ff961ee1eca1ce4a9308e"
+    "sha256": "59214c997286ebb85942ab9c3a585c68b740b2c6f71386833b7ffd2c383f683b"
   },
   "kotlin-compiler-image.js": {
-    "bytes": 112773,
-    "sha256": "2188cb431a4ef48c158f00d95ab3989dfdbd1b6264d577464243581dd2406ac5"
+    "bytes": 97501,
+    "sha256": "d3f24b6cfbc8640edc52b2db466bab6f0a81f1bcae5602dc581b24e4319cf056"
   },
   "kotlin-compiler-worker.js": {
     "bytes": 4020,
     "sha256": "29f173371e2b538303917f82f45122a1db7243b3874ee3d19039e7ed7dd4bc71"
   },
   "kotlin-compiler-worker.js.wasm.gz.0": {
-    "bytes": 13000000,
-    "sha256": "b2af6ffb97c5a9d57b5354e73093f5889f852346df4d11da95b535eb8a753520"
+    "bytes": 14251792,
+    "sha256": "505d65bc5f762fc2ba659730066437f7e7546bde4b8ae3124438534c655efb5a"
   },
   "kotlin-compiler-worker.js.wasm.gz.1": {
-    "bytes": 12826360,
-    "sha256": "acc9fbf3c1779b98594d2a37b7887f50b1e93e14f1a16a63f3e40d4cd395fa83"
+    "bytes": 14251791,
+    "sha256": "85b389038abcfa6157bf622bf80ad9b994cd326dff986b3166e126c4b54f9acf"
   },
   "kotlin-stdlib-wasm-js.bin.gz": {
     "bytes": 3811357,

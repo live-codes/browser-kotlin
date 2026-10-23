@@ -60,7 +60,7 @@
 </header>
 
 <div class="banner" id="banner">
-  First visit downloads the real Kotlin compiler as WebAssembly (~87 MB). It is cached
+  First visit downloads the real Kotlin compiler as WebAssembly (~85 MB). It is cached
   by the browser; nothing is sent to a server.
 </div>
 
@@ -340,7 +340,7 @@ function wasmSize(files) {
 }
 
 async function warmUp() {
-  setStatus('loading real K2 compiler (~87 MB, first visit only)…', 'busy');
+  setStatus('loading real K2 compiler (~85 MB, first visit only)…', 'busy');
   const result = await compiler.request('compile', 'fun main() {}');
   if (result.error) {
     setStatus('compiler failed to load', 'err');

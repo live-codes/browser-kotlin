@@ -7,8 +7,8 @@ needs.
 
 Status: the demos and `@live-codes/kotlin-wasm@0.1.0` are code-complete and
 tested. The package is **not published**. Publishing is blocked only by the
-redistribution terms of the vendored GraalVM image. No LiveCodes changes have
-been made yet.
+redistribution terms of the GraalVM image assets. No LiveCodes changes have been
+made yet.
 
 ---
 
@@ -22,6 +22,7 @@ been made yet.
 | static server | [`serve.mjs`](serve.mjs) | working |
 | minikotlin smoke test | [`test/smoke.mjs`](test/smoke.mjs) | passing |
 | package tests | `packages/kotlin-wasm/test/*.test.js` | 14/14 passing |
+| toolchain build/upgrade | [`packages/kotlin-wasm/scripts`](packages/kotlin-wasm/scripts), [`TOOLCHAIN.md`](packages/kotlin-wasm/TOOLCHAIN.md) | working |
 | technical record | this file | — |
 
 Repository: <https://github.com/live-codes/browser-kotlin> (remote configured,
@@ -143,7 +144,7 @@ program wasm is ~11 KB for hello.
 
 ## 4. Part 2 — the real Kotlin K2 compiler
 
-### 4.1 Why a prebuilt image
+### 4.1 Building it from source
 
 The real K2 compiler is a JVM application. The only browser-runnable form found
 is the **GraalVM Web Image** build from
@@ -151,26 +152,76 @@ is the **GraalVM Web Image** build from
 (`compiler-host`): the published Kotlin compiler jars are compiled ahead of time
 with Oracle GraalVM Web Image (`native-image --tool:svm-wasm`).
 
-The upstream build requires:
+The first pass bootstrapped from a prebuilt image because this 16 GB machine had
+no Oracle GraalVM and no local build pipeline. The committed assets are now
+built from the pinned upstream source with the scripts in
+`packages/kotlin-wasm/scripts/`; the prebuilt image is no longer shipped. The
+full build/upgrade procedure is in
+[`packages/kotlin-wasm/TOOLCHAIN.md`](packages/kotlin-wasm/TOOLCHAIN.md).
 
-- Oracle GraalVM **25.1+** (Community rejects `--tool:svm-wasm`);
-- ~10 GB free RAM per image build; `native-image` is given 24–28 GB heap;
-- the compiler and the Analysis API as **two** images (75 MB each), plus a 12 MB
-  stdlib archive.
+#### Toolchain and environment
 
-This machine has 16 GB total and no Oracle GraalVM, so the images were **not
-rebuilt here**. The prebuilt compiler image and stdlib were copied from
-[`space-enthusiast/kotlin-on-web-playground`](https://github.com/space-enthusiast/kotlin-on-web-playground),
-which publishes the upstream build's output.
-
-Pinned source commits:
-
-| Part | Pin |
+| Part | Version |
 | --- | --- |
+| Oracle GraalVM | **25.0.4+7.1**, Web Image, built inside WSL2 |
+| Binaryen | **133** (`wasm-as`; 108 rejects WasmGC with `unknown heaptype kind`) |
+| OS | Ubuntu 24.04 on WSL2, 12 cores, 12 GB RAM + 4 GB swap |
+| Gradle | 9.7.1 wrapper; Kotlin **2.5.0-dev-9169** |
+| Heap | `native-image -J-Xmx8g`, Gradle `-Xmx1024m`, 2 workers |
 | compiler host | `alex28sh/wasm-code-editor@02a8916077b1ea697808f258dee5a5406c887774` |
-| prebuilt image | `space-enthusiast/kotlin-on-web-playground@5e5a40d49b5d0ddbf8a869ff03f5ee1aca640131` |
-| Kotlin version | `2.5.0-dev-9169` |
-| fetched | 2026-10-21 |
+| built | `2026-10-23T05:46:56Z` |
+
+The upstream README asks for Oracle GraalVM 25.1+ and gives `native-image` 24–28
+GB heap. 25.0.4 also ships the Web Image tool; it only needs
+`--sun-misc-unsafe-memory-access=allow` forwarded to the builder JVM as
+`-J--sun-misc-unsafe-memory-access=allow`. Only the compiler image and stdlib
+are built; the 75 MB Analysis API image is deliberately omitted.
+
+#### What the scripts do
+
+`fetch-toolchain.sh` downloads Oracle GraalVM and Binaryen into `.toolchain/`
+(`--accept-license` required). `build-toolchain.sh`:
+
+1. clones the pinned upstream commit and writes `local.properties` with
+   `graalvm.home`;
+2. replaces `-J-Xmx24g` with `-J-Xmx$HEAP` (default `8g`);
+3. rewrites the bare unsafe-memory flag to the `-J` form;
+4. sets `org.gradle.jvmargs`, disables parallel projects and runs Kotlin
+   compilation in-process;
+5. runs only `:compiler-host:stdlibArchive :compiler-host:webImage`;
+6. assembles `compilerDist/` (generated worker + glue, `.js.wasm`, stdlib) and
+   writes `build-info.json`.
+
+`node scripts/toolchain.mjs vendor --compiler-dist ...` then gzips/splits the
+image, updates `assets/`, `kotlin-assets.json`, `toolchain.lock.json`,
+`COMPILER_VERSION` and the receipts.
+
+#### Memory findings
+
+The final image stage is the constraint on a 16 GB machine:
+
+- **6 GB heap / 7.6 GB WSL** reached `[8/8] Creating image` but was OOM-killed;
+- **8 GB heap / 9.7 GB WSL** produced a valid 70 MB `.wasm`, but the
+  `native-image` parent was killed while `wasm-as` parsed the 2.3 GB `.wat`, so
+  the generated loader was never written;
+- **8 GB heap / 12 GB WSL + 4 GB swap** succeeded (`BUILD SUCCESSFUL`). Stage 8
+  writes a 2.3 GB `.wat`; `wasm-as` peaks around 3.5 GB alongside the 8 GB
+  builder heap, so ~12 GB of VM memory is required.
+
+#### Result
+
+| Part | Source build |
+| --- | --- |
+| compiler image | 72,602,076 B raw, 28,503,583 B gz in two parts |
+| stdlib | 12,005,328 B raw, 3,811,357 B gz |
+| generated host + glue | 97,501 B (`kotlin-compiler-image.js`) |
+| manifest | 467 B |
+| package tests | 14/14 pass on Node 24 with `--experimental-wasm-exnref` |
+
+The image SHA-256 is `90ed9c9b12d3c5cbcde987d6f8a3b2e8cc8b51840e0f5767af0cbc79f31c6d91`;
+the stdlib is unchanged from the prebuilt bootstrap
+(`1745038e115f1b1f591a0fdfd745458c91fa938dc4303898d4d2a63aacfabf21`). Every
+compressed part and the generated host are pinned in `toolchain.lock.json`.
 
 ### 4.2 Assets and transport
 
@@ -179,19 +230,19 @@ deliberately omitted.
 
 | Asset | Compressed | Inflated |
 | --- | ---: | ---: |
-| compiler image | 25,826,360 B, split into `.gz.0` 13,000,000 + `.gz.1` 12,826,360 | 74,849,307 B |
+| compiler image | 28,503,583 B, split into `.gz.0` 14,251,792 + `.gz.1` 14,251,791 | 72,602,076 B |
 | Wasm stdlib | 3,811,357 B (`kotlin-stdlib-wasm-js.bin.gz`) | 12,005,328 B |
-| generated host | 112,773 B (`kotlin-compiler-image.js`) | — |
+| generated host | 97,501 B (`kotlin-compiler-image.js`) | — |
 | wrapper | 4,020 B (`kotlin-compiler-worker.js`) | — |
 | manifest | 467 B (`kotlin-assets.json`) | — |
-| **total** | **29,754,977 B (28.4 MiB)** | **86,854,635 B (82.8 MiB)** |
+| **total** | **32,416,928 B (30.9 MiB)** | **84,607,404 B (80.7 MiB)** |
 
 The compiler gzip is split so **every file is under jsDelivr's 20 MB per-file
-cap**. Both raw artifacts keep their upstream SHA-256:
+cap**. The stdlib keeps its upstream SHA-256; the image hash is from this build:
 
 ```
-e197bbe3e265505997231cc1b907ab33acdb507a88647308e7790cc7afdb2512
-  74,849,307 B  compiler image
+90ed9c9b12d3c5cbcde987d6f8a3b2e8cc8b51840e0f5767af0cbc79f31c6d91
+  72,602,076 B  compiler image (source build)
 
 1745038e115f1b1f591a0fdfd745458c91fa938dc4303898d4d2a63aacfabf21
   12,005,328 B  stdlib archive
@@ -375,9 +426,10 @@ compiles an empty program once, so the first user run is warm.
   pre-supplied.
 - No Analysis API image is shipped, so no semantic completion/inline analysis.
 - Kotlin version is a **dev build** (`2.5.0-dev-9169`), not a stable release.
-- The image is platform-specific to the GraalVM build; rebuilding needs Oracle
-  GraalVM + the upstream patch pipeline.
-- The upstream publishing repo has no licence file; see §11.
+- The image is built by the scripts in `packages/kotlin-wasm/scripts/`; see
+  [`packages/kotlin-wasm/TOOLCHAIN.md`](packages/kotlin-wasm/TOOLCHAIN.md). It is
+  tied to the Oracle GraalVM/Binaryen versions in the lock.
+- Oracle GraalVM terms still govern the generated image; see §11.
 
 ---
 
@@ -598,7 +650,7 @@ LiveCodes uses the same CDN-vendor pattern as `@live-codes/dlang-wasm` and
      - `compiler.liveReload: true`
      - `extensions: ['kt']`
      - `editor: 'script'`
-     - `largeDownload: true` (30 MB first load)
+      - `largeDownload: true` (32 MB first load)
      - editor support:
        - Monaco: `monacoLanguagesBaseUrl + 'kotlin.js'`, language `kotlin`
          (`@live-codes/monaco-languages@0.3.14/dist/kotlin.js` exists);
@@ -653,7 +705,7 @@ LiveCodes uses the same CDN-vendor pattern as `@live-codes/dlang-wasm` and
   CDN does not resolve the npm package's redistribution rights.
 - **No Analysis API**: no semantic completion/lint. Editor highlighting works via
   Monaco/CodeMirror; compiler diagnostics are shown after Run.
-- **30 MB first load**: `largeDownload: true` and lazy loading are required.
+- **32 MB first load**: `largeDownload: true` and lazy loading are required.
 - **Dev compiler**: `2.5.0-dev-9169` is not a stable Kotlin release; upgrading
   means rebuilding the GraalVM image.
 
@@ -663,7 +715,7 @@ LiveCodes uses the same CDN-vendor pattern as `@live-codes/dlang-wasm` and
 
 | Route | Result |
 | --- | --- |
-| **Real K2 via GraalVM Web Image** (this package) | Genuine Kotlin, works; ~30 MB gz / ~87 MB inflated; prebuilt artifacts and licensing to clear |
+| **Real K2 via GraalVM Web Image** (this package) | Genuine Kotlin, works; ~32 MB gz / ~85 MB inflated; built from source; licensing to clear |
 | **minikotlin** (this repo's other demo) | ~1.9 MB, instant, but a subset; no published licence |
 | **TeaVM + Kotlin class files** | Kotlin class files run 8/8 on the TeaVM back end (see `../browser-jvm/FINDINGS.md`), but no browser compiler emits JVM class files |
 | **Doppio JVM in JS** | `kotlinc` compiles took ~7–20 minutes and often did not finish; abandoned by `@live-codes/java-wasm` |
@@ -677,22 +729,23 @@ gzipped/split.
 
 ## 9. Open questions / honest unknowns
 
-- **Asset licensing.** The generated image carries GraalVM runtime terms and the
-  prebuilt repo has no licence file. Written clearance is required before
-  publishing the npm package.
+- **Asset licensing.** The generated image carries GraalVM runtime terms.
+  Building it from source gives provenance, not redistribution rights; Oracle's
+  terms need clearance before publishing the npm package.
 - **LiveCodes nested workers.** Not yet tested inside the LiveCodes result
   sandbox/CSP; this is the first integration experiment.
 - **Node 22** specifically, and **Firefox/Safari**, have not been tested.
 - **Browser asset integrity.** The wrapper trusts `baseUrl`; hashes are verified
   by `copy-assets`, the Node tests and `npm run assets`, but not at browser
   fetch time. A `crypto.subtle` check could be added, at the cost of hashing
-  75 MB in the worker.
+  ~73 MB in the worker.
 - **`@JsFun` prelude edge cases.** File-level annotations, explicit
   `import kotlin.io.readln`, or unusual package declarations are not specifically
   handled; standard playground snippets are.
-- **Rebuild reproducibility.** The image was not rebuilt locally (no Oracle
-  GraalVM, 16 GB RAM). The upstream commits and hashes are pinned, but the build
-  pipeline is external.
+- **Rebuild reproducibility.** The image is rebuilt by
+  `scripts/build-toolchain.sh`; the upstream commit, Kotlin/GraalVM/Binaryen
+  versions, heap and every hash are pinned. A 12 GB WSL VM with `HEAP=8g` is the
+  smallest configuration verified here.
 - **Stable Kotlin.** The pinned compiler is a dev build; no stable K2/Wasm
   browser image was available.
 - **No CI** yet for the package (tests/`npm pack`).
@@ -740,9 +793,10 @@ npm publish
 
 - Kotlin `2.5.0-dev-9169`
 - host `alex28sh/wasm-code-editor@02a8916077b1ea697808f258dee5a5406c887774`
-- prebuilt `space-enthusiast/kotlin-on-web-playground@5e5a40d49b5d0ddbf8a869ff03f5ee1aca640131`
-- compiler image raw `74,849,307 B`, SHA-256
-  `e197bbe3e265505997231cc1b907ab33acdb507a88647308e7790cc7afdb2512`
+- compiled with Oracle GraalVM `25.0.4+7.1` and Binaryen `133`, heap `8g`,
+  on `2026-10-23T05:46:56Z`
+- compiler image raw `72,602,076 B`, SHA-256
+  `90ed9c9b12d3c5cbcde987d6f8a3b2e8cc8b51840e0f5767af0cbc79f31c6d91`
 - stdlib raw `12,005,328 B`, SHA-256
   `1745038e115f1b1f591a0fdfd745458c91fa938dc4303898d4d2a63aacfabf21`
 - every compressed part, the host, wrapper and manifest are hashed in
@@ -763,21 +817,20 @@ The assets are third-party:
   <https://github.com/JetBrains/kotlin/blob/master/license/README.md>.
 - **GraalVM Web Image runtime:** the generated image embeds GraalVM runtime
   code; the generated script carries GPLv2 + Classpath Exception headers, and
-  the upstream build used Oracle GraalVM 25i4 under Oracle's GraalVM Free Terms
-  and Conditions.
-- **Prebuilt publishing repo:** `space-enthusiast/kotlin-on-web-playground` has
-  no licence file.
+  the committed build used Oracle GraalVM 25.0.4 under Oracle's GraalVM Free
+  Terms and Conditions.
 
 Consequence: the compiler/stdlib assets are vendored for **evaluation only**
-until the redistribution terms are confirmed with the upstream authors and
-GraalVM compliance is settled. Publishing the npm package is blocked on that
-decision; the package's MIT licence does not grant rights to those assets.
+until Oracle's redistribution terms are confirmed. Building from source improves
+provenance but does not grant those rights; publishing the npm package is blocked
+on that decision, and the package's MIT licence does not grant rights to those
+assets.
 
 `minikotlin` also publishes no licence on `minikotlin.run`; its vendored copy in
 `vendor/minikotlin/` is evaluation-only as well.
 
-`assets/kotlin-compiler-image.js` and the `.wasm` parts were copied unchanged
-from the upstream prebuilt image. Only transport wrappers were added: gzip,
-splitting into two parts, a manifest, a `DecompressionStream` wrapper and, at
-runtime, a `wasm_path`/stdlib URL rewrite for Blob workers. The generated image
-is otherwise untouched.
+`assets/kotlin-compiler-image.js` and the `.wasm` parts are built from the
+pinned upstream source by `scripts/build-toolchain.sh`. Only transport wrappers
+were added: gzip, splitting into two parts, a manifest, a
+`DecompressionStream` wrapper and, at runtime, a `wasm_path`/stdlib URL rewrite
+for Blob workers. The generated image is otherwise untouched.
