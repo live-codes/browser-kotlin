@@ -1,18 +1,19 @@
 # Third-party notices
 
-This package's own code is **MIT** (see `LICENSE`). This file is the attribution
-and provenance record for the toolchain in `assets/`.
+This package's own code is **Apache-2.0** (see `LICENSE`), the same license as
+the Kotlin compiler. This file is the attribution and provenance record for the
+toolchain in `assets/`.
 
 ## Assets
 
 | Asset | What it is | Terms |
 | --- | --- | --- |
-| `assets/kotlin-compiler-image.js` | The GraalVM Web Image host generated from the Kotlin compiler | Generated code; includes GraalVM runtime code under GPLv2 + Classpath Exception and Oracle GraalVM terms |
+| `assets/kotlin-compiler-image.js` | The GraalVM Web Image host generated from the Kotlin compiler | Generated code; includes GraalVM runtime code under GPLv2 + Classpath Exception and the GraalVM Free Terms and Conditions (GFTC) |
 | `assets/kotlin-compiler-worker.js.wasm.gz.0` | First half of the gzipped compiler image | Same as above |
 | `assets/kotlin-compiler-worker.js.wasm.gz.1` | Second half of the gzipped compiler image | Same as above |
 | `assets/kotlin-stdlib-wasm-js.bin.gz` | The Kotlin/Wasm standard library archive, gzipped | Apache-2.0 |
-| `assets/kotlin-assets.json` | Manifest of parts, sizes and inflated SHA-256 | MIT (this package) |
-| `assets/kotlin-compiler-worker.js` | The decompression wrapper around the generated worker | MIT (this package) |
+| `assets/kotlin-assets.json` | Manifest of parts, sizes and inflated SHA-256 | Apache-2.0 (this package) |
+| `assets/kotlin-compiler-worker.js` | The decompression wrapper around the generated worker | Apache-2.0 (this package) |
 
 The compiler itself is the **real Kotlin compiler (K2)**, version
 `2.5.0-dev-9169`, which is Apache-2.0. It was turned into a WebAssembly image
@@ -27,14 +28,27 @@ JetBrains s.r.o. and the Kotlin Programming Language contributors, and are
 licensed under the Apache License, Version 2.0. Kotlin's own third-party notices
 are at <https://github.com/JetBrains/kotlin/blob/master/license/README.md>.
 
-The committed build used Oracle GraalVM 25.0.4 and Binaryen 133, under Oracle's
-GraalVM Free Terms and Conditions. The generated image embeds GraalVM runtime
-code; the generated script carries GPLv2 + Classpath Exception headers. The
-exact commits, build tools, heap and every asset hash are pinned in
+## GraalVM
+
+The committed compiler image and loader were generated with **Oracle GraalVM
+Web Image (Substrate VM) 25.0.4+7.1**, and the image embeds GraalVM runtime
+code. The generated script carries GPLv2 + Classpath Exception headers.
+
+Oracle GraalVM is governed by the **GraalVM Free Terms and Conditions (GFTC)**.
+The GFTC, Oracle's `NOTICE.txt`, and the distribution's license-information user
+manual are reproduced verbatim in:
+
+- [`licenses/GraalVM-LICENSE.txt`](licenses/GraalVM-LICENSE.txt)
+- [`licenses/GraalVM-NOTICE.txt`](licenses/GraalVM-NOTICE.txt)
+- [`licenses/GraalVM-license-information-user-manual.zip`](licenses/GraalVM-license-information-user-manual.zip)
+
+See also [`NOTICE`](NOTICE).
+
+The exact commits, build tools, heap and every asset hash are pinned in
 [`toolchain.lock.json`](toolchain.lock.json): host
 `alex28sh/wasm-code-editor@02a8916`, source build (Oracle GraalVM + Binaryen).
-**Treat these assets as evaluation-only until Oracle's terms are confirmed for
-redistribution; this package does not grant a licence to redistribute them.**
+The package's Apache-2.0 license does not grant rights to the GraalVM image;
+Oracle's GFTC governs it. Review the GFTC before redistributing the assets.
 
 ## What this package changed
 

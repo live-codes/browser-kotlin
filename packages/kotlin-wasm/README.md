@@ -276,10 +276,12 @@ before copying, so a stale pairing fails there rather than on someone's page.
 
 ## Licence
 
-MIT for this package's own code, like the other LiveCodes wasm packages. The
-assets are built from the pinned upstream host: the Kotlin compiler and
+Apache-2.0 for this package's own code, the same license as the Kotlin compiler.
+The assets are built from the pinned upstream host: the Kotlin compiler and
 Kotlin/Wasm standard library are Apache-2.0, and the GraalVM Web Image runtime
-carries Oracle GraalVM terms. Building them here improves provenance but does
-not change those terms. See [`LICENSE`](LICENSE) and
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) for attribution, provenance
-and the redistribution caveat.
+is under the GraalVM Free Terms and Conditions (GFTC). The GFTC and Oracle's
+distribution notices are included in [`licenses/`](licenses/). Building them here
+improves provenance but does not change those terms. See [`LICENSE`](LICENSE),
+[`NOTICE`](NOTICE), [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and
+[`licenses/`](licenses/) for attribution, provenance and the redistribution
+caveat.

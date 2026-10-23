@@ -221,14 +221,17 @@ toolchain downloads and upstream checkout are ignored by git (`.toolchain/`).
 Building the image yourself improves provenance but does not change the
 licences:
 
-- This package's code is MIT.
+- This package's own code is Apache-2.0, the same license as the Kotlin compiler.
 - The Kotlin compiler and the Kotlin/Wasm standard library are Apache-2.0.
-- The generated image embeds GraalVM runtime code. Oracle GraalVM, including
-  Web Image, is governed by Oracle's GraalVM licence terms. Review those terms
-  before redistributing the committed assets.
+- The generated image and loader embed GraalVM runtime code and are governed by
+  the GraalVM Free Terms and Conditions (GFTC). The GFTC, Oracle's NOTICE and
+  the distribution's license-information manual are reproduced in
+  [`licenses/`](licenses/). Review those terms before redistributing the
+  committed assets.
 - Binaryen is Apache-2.0 and is a build-time tool; it is not shipped.
 
-See [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and [`LICENSE`](LICENSE).
+See [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md), [`LICENSE`](LICENSE),
+[`NOTICE`](NOTICE) and [`licenses/`](licenses/).
 
 ## Troubleshooting
 

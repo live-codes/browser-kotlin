@@ -41,7 +41,7 @@ Key commits:
 | `7bc1ba0` | Apache-2.0 license iteration |
 | `f296025` | repository URL metadata |
 | `3c3aca1` | `bin` fix and `toolchain.lock.json` |
-| `5e0a13b` | final **MIT** license, matching clang-wasm |
+| `5e0a13b` | MIT license iteration (later reverted to Apache-2.0) |
 
 ---
 
@@ -67,8 +67,11 @@ browser-kotlin/
     test/                    14 Node tests
     example/                 ESM and classic-worker browser checks
     toolchain.lock.json      upstream commits and every asset hash
-    LICENSE                  MIT for this package's code
+    TOOLCHAIN.md             build/upgrade process
+    LICENSE                  Apache-2.0 for this package's code
+    NOTICE                   Kotlin / GraalVM attribution
     THIRD-PARTY-NOTICES.md   Kotlin / GraalVM attribution and caveat
+    licenses/                Oracle GraalVM GFTC, NOTICE and license manual
 ```
 
 ---
@@ -563,8 +566,9 @@ Browser checks:
 
 Packaging checks:
 
-- `npm publish --dry-run --ignore-scripts`: clean, 27 files, 29.5 MB, public
-  access, `LICENSE` + `THIRD-PARTY-NOTICES.md`, no `NOTICE`, no warnings;
+- `npm publish --dry-run --ignore-scripts`: clean, 36 files, 32.5 MB, public
+  access, `LICENSE` + `NOTICE` + `THIRD-PARTY-NOTICES.md` + `licenses/`, no
+  warnings;
 - the packed tarball was installed into a clean project; the Node API ran with
   stdin and `npx kotlin-wasm-copy-assets --print-path` resolved the installed
   assets;
@@ -682,10 +686,10 @@ LiveCodes uses the same CDN-vendor pattern as `@live-codes/dlang-wasm` and
    covering name/title/scriptType/extensions/`largeDownload`/editor support.
 5. Add `docs/docs/languages/kotlin-wasm.mdx`.
 6. Add a `vendor-licenses.md` entry:
-   - `@live-codes/kotlin-wasm`: MIT;
+   - `@live-codes/kotlin-wasm`: Apache-2.0;
    - Kotlin compiler + stdlib: Apache-2.0;
-   - GraalVM Web Image: Oracle GraalVM terms / GPLv2 + Classpath Exception
-     caveat.
+   - GraalVM Web Image: GraalVM Free Terms and Conditions (GFTC) / GPLv2 +
+     Classpath Exception; the GFTC and Oracle notice are in `licenses/`.
 7. Verify in the LiveCodes sandbox:
    - nested Blob workers (compiler + program) under the result iframe CSP
      (`worker-src blob:`);
@@ -806,8 +810,10 @@ npm publish
 
 ## 11. Licence and provenance
 
-**This package's own code is MIT**, following the other LiveCodes wasm packages.
-`LICENSE` contains the MIT text and a note that MIT does not cover `assets/`.
+**This package's own code is Apache-2.0**, the same license as the Kotlin
+compiler. `LICENSE` contains the Apache-2.0 text and a note that it does not
+cover `assets/`; `NOTICE` and `licenses/` carry the Kotlin and GraalVM
+attribution.
 
 The assets are third-party:
 
@@ -817,14 +823,15 @@ The assets are third-party:
   <https://github.com/JetBrains/kotlin/blob/master/license/README.md>.
 - **GraalVM Web Image runtime:** the generated image embeds GraalVM runtime
   code; the generated script carries GPLv2 + Classpath Exception headers, and
-  the committed build used Oracle GraalVM 25.0.4 under Oracle's GraalVM Free
-  Terms and Conditions.
+  the committed build used Oracle GraalVM 25.0.4 under the GraalVM Free Terms
+  and Conditions (GFTC). The GFTC, Oracle's `NOTICE.txt` and the distribution's
+  license-information manual are reproduced in `licenses/`.
 
-Consequence: the compiler/stdlib assets are vendored for **evaluation only**
-until Oracle's redistribution terms are confirmed. Building from source improves
-provenance but does not grant those rights; publishing the npm package is blocked
-on that decision, and the package's MIT licence does not grant rights to those
-assets.
+Consequence: the compiler/toolchain assets remain subject to their third-party
+terms; the GFTC is included for the image. Building from source improves
+provenance but does not grant redistribution rights beyond those terms; review
+them before publishing. The package's Apache-2.0 license does not grant rights
+to the GraalVM image.
 
 `minikotlin` also publishes no licence on `minikotlin.run`; its vendored copy in
 `vendor/minikotlin/` is evaluation-only as well.

@@ -94,13 +94,15 @@ by the package's browser engine.
 ## Licensing
 
 This package's own code — including the decompression wrapper and the manifest
-— is **MIT**; see [`../LICENSE`](../LICENSE).
+— is **Apache-2.0**, the same license as the Kotlin compiler; see
+[`../LICENSE`](../LICENSE).
 
 **The compiler assets are unconfirmed for redistribution.** The Kotlin compiler
 itself is Apache-2.0; the GraalVM Web Image runtime embedded in the generated
 `.wasm` is governed by Oracle GraalVM terms (the committed build used Oracle
 GraalVM 25.0.4, under Oracle's GraalVM Free Terms and Conditions). Building the
-image here improves provenance but does not change those terms. These assets
-are vendored for evaluation only; confirm Oracle's terms for redistribution
-before shipping them. See
-[`../THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md).
+image here improves provenance but does not change those terms. The GFTC and
+Oracle's distribution notices are reproduced in
+[`../licenses/`](../licenses/); see [`../NOTICE`](../NOTICE) and
+[`../THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md). Review Oracle's terms
+before redistributing the image.
