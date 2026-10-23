@@ -6,6 +6,7 @@ the browser (or in Node) — **no server compiles anything**, and nothing is sen
 anywhere.
 
 Source: <https://github.com/live-codes/browser-kotlin/tree/main/packages/kotlin-wasm>
+· [technical record](https://github.com/live-codes/browser-kotlin/blob/main/FINDINGS.md)
 
 ```js
 import { createCompiler } from '@live-codes/kotlin-wasm';
