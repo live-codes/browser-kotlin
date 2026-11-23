@@ -21,7 +21,7 @@ function assertBrowser() {
   }
 }
 
-function resolveBaseUrl(options) {
+export function resolveBaseUrl(options) {
   if (!options.baseUrl) {
     throw new KotlinWasmError(
       'baseUrl is required in the browser. Copy the package assets somewhere your page can ' +
@@ -63,7 +63,7 @@ async function loadWorkerScripts(baseUrl) {
   return { wrapperUrl, imageUrl };
 }
 
-function rewriteWrapper(text, baseUrl, imageUrl) {
+export function rewriteWrapper(text, baseUrl, imageUrl) {
   const manifestUrl = new URL('kotlin-assets.json', baseUrl).href;
   return text
     .replace(
@@ -76,15 +76,20 @@ function rewriteWrapper(text, baseUrl, imageUrl) {
     );
 }
 
-function rewriteImage(text, baseUrl) {
+/**
+ * Points the generated loader at our own wasm/stdlib URLs. `urls` lets a caller
+ * that already inflated the bytes (a worker loading the image itself) pass Blob
+ * URLs instead of asset paths.
+ */
+export function rewriteImage(text, baseUrl, urls = {}) {
   const runCall = 'GraalVM.run(load_cmd_args(),config)';
   if (!text.includes(runCall)) {
     throw new KotlinWasmError(
       'The vendored Kotlin compiler image has an unexpected shape: its startup call was not found.'
     );
   }
-  const wasmUrl = new URL('kotlin-compiler-worker.js.wasm', baseUrl).href;
-  const stdlibUrl = new URL('kotlin-stdlib-wasm-js.bin', baseUrl).href;
+  const wasmUrl = urls.wasmUrl || new URL('kotlin-compiler-worker.js.wasm', baseUrl).href;
+  const stdlibUrl = urls.stdlibUrl || new URL('kotlin-stdlib-wasm-js.bin', baseUrl).href;
   return text
     .replace(
       runCall,
@@ -433,11 +438,14 @@ export async function createBrowserEngine(options = {}) {
   const baseUrl = resolveBaseUrl(options);
   const record = await acquireRecord(baseUrl, options.onProgress);
 
-  try {
-    await record.warm();
-  } catch (error) {
-    releaseRecord(record, options.onProgress);
-    throw error;
+  // A host that already runs in a worker can skip the throwaway compile.
+  if (options.warm !== false) {
+    try {
+      await record.warm();
+    } catch (error) {
+      releaseRecord(record, options.onProgress);
+      throw error;
+    }
   }
 
   let disposed = false;
