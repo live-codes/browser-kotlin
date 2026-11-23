@@ -4,18 +4,18 @@ Repository: <https://github.com/live-codes/browser-kotlin>
 
 Technical record: [FINDINGS.md](FINDINGS.md)
 
-Two independent demos that compile and run Kotlin **entirely in the browser**,
-with no server and no build step:
+Two demos that compile and run Kotlin **entirely in the browser**, with no
+server and no build step. The default page uses the real compiler:
 
-| Demo | Compiler | First load | Language |
+| Demo | Compiler | First load | Output |
 | --- | --- | ---: | --- |
-| [`index.html`](index.html) | [minikotlin](https://minikotlin.run) 0.1.0 — from-scratch C→Wasm compiler | ~2 MB | a tested Kotlin subset |
-| [`real.html`](real.html) | **real Kotlin 2.5.0-dev-9169 (K2)** via GraalVM Web Image | ~32 MB gz (~85 MB inflated) | real Kotlin + stdlib |
+| [`index.html`](index.html) | **real Kotlin 2.5.0-dev-9169 (K2)** via GraalVM Web Image | ~32 MB gz (~85 MB inflated) | **Wasm** or **JavaScript**, switchable |
+| [`minikotlin.html`](minikotlin.html) | [minikotlin](https://minikotlin.run) 0.1.0 — from-scratch C→Wasm compiler | ~2 MB | a tested Kotlin subset |
 
-Both demos emit **WasmGC**, instantiate it on the page, and stream `println`
-output. The npm package additionally supports `target: 'js'`: K2's Kotlin/JS
-backend emits a standalone `main.mjs` that a page can import and run itself.
-Nothing is sent anywhere.
+`index.html` defaults to **Wasm**: the compiler emits a WasmGC program, the page
+instantiates it and streams `println` output. Switch **Output** to
+**JavaScript** and it uses K2's Kotlin/JS backend instead: the page shows the
+emitted `main.mjs` and runs it itself in a worker. Nothing is sent anywhere.
 
 ## Run it
 
@@ -23,9 +23,9 @@ Nothing is sent anywhere.
 node serve.mjs          # http://localhost:8001/
 ```
 
-- <http://localhost:8001/> — minikotlin demo (tiny, fast)
-- <http://localhost:8001/real.html> — real K2 compiler demo (large first load)
-- <http://localhost:8001/packages/kotlin-wasm/example/js.html> — real K2 JS target
+- <http://localhost:8001/> — real K2 compiler demo, Wasm and JS targets
+- <http://localhost:8001/minikotlin.html> — minikotlin demo (tiny, fast)
+- <http://localhost:8001/packages/kotlin-wasm/example/js.html> — package JS target
 - <http://localhost:8001/packages/kotlin-wasm/example/> — package Wasm target
 
 Press **Run** (or Ctrl/Cmd+Enter). A static server is required because browsers
@@ -55,7 +55,8 @@ It has ESM and Node entries, an IIFE build for classic workers, a
 `kotlin-wasm-copy-assets` CLI, asset receipts and tests. It supports two output
 targets: **`wasm`** (default, K2's WasmGC backend) and **`js`** (K2's Kotlin/JS
 backend, emitting a standalone `main.mjs`). `compile()` returns the emitted
-files without running them. `real.html` uses the Wasm assets and worker wrapper.
+files without running them. `index.html` uses the package directly for both
+targets.
 The package's own code is **Apache-2.0**, the same license as the Kotlin
 compiler; the built assets keep their own third-party terms (see
 [`LICENSE`](packages/kotlin-wasm/LICENSE),
@@ -64,7 +65,7 @@ compiler; the built assets keep their own third-party terms (see
 
 ## Measured
 
-### minikotlin (`index.html`)
+### minikotlin (`minikotlin.html`)
 
 | Program | Result |
 | --- | --- |
@@ -79,7 +80,7 @@ compiler; the built assets keep their own third-party terms (see
 
 Compile ~5–20 ms warm; the first run includes the 1.9 MB compiler load.
 
-### Real K2 (`real.html`)
+### Real K2 (`index.html`, Wasm by default)
 
 | Program | Result |
 | --- | --- |
@@ -90,20 +91,25 @@ Compile ~5–20 ms warm; the first run includes the 1.9 MB compiler load.
 | `kotlin.math` (`pow`, `roundToInt`, `fold`) | correct |
 | Type error + unresolved reference | `2:20 error: Initializer type mismatch…`, `4:13 error: Unresolved reference…` |
 | Infinite loop | stopped at 15 s; the compiler worker survives and the next run works |
+| **Output: JavaScript** | one 41.0 KB `main.mjs` (hello example), ~1.3–1.5 s compile, ~6–18 ms run |
+| **Output: JavaScript** + type error | same located diagnostics |
 
 First compile after load: ~3.8 s. Later compiles: ~1.2–1.9 s. Run: 20–40 ms.
+The JavaScript target compiles in ~1.2–1.5 s and its emitted module runs in
+tens of milliseconds; the third pane shows the exact `main.mjs` the page runs.
 
 ## How it works
 
 ### 1. minikotlin
 
 [minikotlin](https://minikotlin.run) is a Kotlin→WasmGC compiler written from
-scratch in C and compiled to WebAssembly with Emscripten. `index.html` loads it
-inside a module Worker, compiles the source, then instantiates the emitted
-module with the host imports in `vendor/minikotlin/engine/`.
+scratch in C and compiled to WebAssembly with Emscripten. `minikotlin.html`
+loads it inside a module Worker, compiles the source, then instantiates the
+emitted module with the host imports in `vendor/minikotlin/engine/`.
 
 ```
-index.html                  editor, examples, Run, output, watchdog
+index.html                  real K2 demo: editor, examples, Wasm/JS target, output
+minikotlin.html             minikotlin demo: editor, examples, output, watchdog
 runner.js                   module Worker: load compiler → compile → instantiate → run
 vendor/minikotlin/          minikotlin.js + 1.9 MB wasm + engine runtimes
 ```
@@ -119,28 +125,30 @@ host with Oracle GraalVM Web Image by
 [`packages/kotlin-wasm/scripts/build-toolchain.sh`](packages/kotlin-wasm/scripts/build-toolchain.sh);
 see [`TOOLCHAIN.md`](packages/kotlin-wasm/TOOLCHAIN.md).
 
-`real.html` starts the classic worker
-`packages/kotlin-wasm/assets/kotlin-compiler-worker.js`.
-That file is a small wrapper: it patches `fetch`, then imports the generated
-GraalVM worker (`kotlin-compiler-image.js`). The compiler image and stdlib are
-requested as `.gz`, piped through `DecompressionStream`, and only then handed to
-the GraalVM loader. The generated worker then answers messages:
+`index.html` imports the package (`packages/kotlin-wasm/src/index.js`) and calls
+`createCompiler({ target, baseUrl })`. The package starts the classic compiler
+worker. That worker is a small wrapper: it patches `fetch`, then imports the
+generated GraalVM worker (`kotlin-compiler-image.js`). The compiler image and
+stdlib are requested as `.gz`, piped through `DecompressionStream`, and only
+then handed to the GraalVM loader. The generated worker then answers messages:
 
 ```js
 worker.postMessage({ id, operation: 'compile', text: source, argument: '' });
 // -> answer JSON: { ok, milliseconds, diagnostics, files }
 ```
 
-`compile` returns `main.wasm`, `main.mjs`, `main.import-object.mjs` and
-`main.js-builtins.mjs`. `real.html` rewrites the generated imports to Blob URLs
+For **Wasm**, `compile` returns `main.wasm`, `main.mjs`, `main.import-object.mjs`
+and `main.js-builtins.mjs`. The page rewrites the generated imports to Blob URLs
 and imports `main.mjs` in a separate module Worker, overriding `console.*` so
 Kotlin/Wasm's `println` is streamed to the output panel. The program worker is
 terminated after 15 s; the compiler stays warm.
 
-For the **JS target**, the package loads a second source-built compiler image
-from `assets/js/` and calls K2's Kotlin/JS backend. The result is one standalone
-`main.mjs`, which the page can import and run without a Wasm import object. The
-compiler image itself is still Wasm; only the emitted program is JavaScript. See
+For **JavaScript**, the demo calls `compiler.compile(source)` and gets one
+self-contained `main.mjs`. It displays that module in the third pane and runs it
+in its own module worker — exactly what a host such as LiveCodes would do with
+the output. The compiler image is still Wasm and still needs WasmGC; only the
+emitted program is JavaScript. Switching the **Output** select swaps the
+compiler image and releases the previous worker. See also
 [`packages/kotlin-wasm/example/js.html`](packages/kotlin-wasm/example/js.html).
 
 Only the compiler images are vendored — the 75 MB **Analysis API** image (used

@@ -16,8 +16,8 @@ made yet.
 
 | Deliverable | Path | State |
 | --- | --- | --- |
-| minikotlin demo | [`index.html`](index.html), [`runner.js`](runner.js) | working |
-| real-K2 demo | [`real.html`](real.html) | working |
+| real-K2 demo (default, Wasm + JS) | [`index.html`](index.html) | working |
+| minikotlin demo | [`minikotlin.html`](minikotlin.html), [`runner.js`](runner.js) | working |
 | npm package | [`packages/kotlin-wasm`](packages/kotlin-wasm) | working, unpublished |
 | static server | [`serve.mjs`](serve.mjs) | working |
 | minikotlin smoke test | [`test/smoke.mjs`](test/smoke.mjs) | passing |
@@ -42,6 +42,10 @@ Key commits:
 | `f296025` | repository URL metadata |
 | `3c3aca1` | `bin` fix and `toolchain.lock.json` |
 | `5e0a13b` | MIT license iteration (later reverted to Apache-2.0) |
+| `f1f7027` | build the Wasm image from source |
+| `ac3d00e` | Apache-2.0 + GraalVM notice |
+| `bcaa58a` | Kotlin/JS target |
+| (this commit) | real K2 default demo with a Wasm/JS switch |
 
 ---
 
@@ -49,9 +53,9 @@ Key commits:
 
 ```
 browser-kotlin/
-  index.html                 minikotlin demo
+  index.html                 real-K2 demo (default); Wasm/JS output switch
+  minikotlin.html            minikotlin demo
   runner.js                  minikotlin module worker
-  real.html                  real-K2 demo
   serve.mjs                  static server, application/wasm, CORS
   README.md
   FINDINGS.md                this file
@@ -97,7 +101,7 @@ Assets (`vendor/minikotlin/`):
 
 ### 3.2 Execution path
 
-`index.html` starts `runner.js` as a module Worker. The worker fetches
+`minikotlin.html` starts `runner.js` as a module Worker. The worker fetches
 `minikotlin.js`, appends `export default createMinikotlin`, imports it from a
 Blob URL, and drives the raw C API:
 
@@ -302,8 +306,8 @@ character offsets into the source. The compiler takes **one** source string.
 
 ### 4.5 Browser execution
 
-`real.html` and the package's browser engine both run the generated program in
-a **nested module Worker**:
+`index.html` and the package's browser engine both run the generated Wasm
+program in a **nested module Worker**:
 
 1. decode the four files;
 2. create Blob URLs for `main.wasm`, `main.js-builtins.mjs`,
@@ -639,7 +643,7 @@ Browser checks:
 - ESM example (`example/index.html`) with stdin;
 - classic-worker IIFE example (`example/iife.html`) with stdin;
 - assets on a second origin;
-- the root `real.html` demo.
+- the root `index.html` demo, Wasm and JS output.
 
 Packaging checks:
 
@@ -684,6 +688,7 @@ and publishing with `--provenance` from CI.
 | minikotlin browser examples | pass |
 | real-K2 browser demo, all examples | pass |
 | real-K2 diagnostics | pass, correct line/column |
+| real-K2 JavaScript output | pass, 41.0 KB `main.mjs`, displayed and run by the page |
 | real-K2 infinite loop | 15 s timeout; compiler survives |
 | package Node tests | 18/18 (Wasm + JS) |
 | package ESM browser example + stdin | pass |
@@ -838,8 +843,12 @@ without a Wasm import object.
   The emitted JS program itself is ordinary JavaScript.
 - **JS compiler image.** It is still a ~32.7 MB gz GraalVM image and needs
   WasmGC/exception handling; only the emitted program avoids WasmGC.
-- **Node 22** specifically, and **Firefox/Safari**, have not been tested. The JS
-  target's Node and Chromium paths were tested here.
+- **Node versions.** Tested on Node 24.11, where WebAssembly exceptions are on by
+  default; Node 22–23 still needs `--experimental-wasm-exnref`. The package
+  feature-detects this instead of inspecting `process.execArgv`, because
+  `node --test` child processes do not repeat the parent's flags.
+- **Firefox/Safari** have not been tested. The JS target's Node and Chromium
+  paths were tested here.
 - **Browser asset integrity.** The wrapper trusts `baseUrl`; hashes are verified
   by `copy-assets`, the Node tests and `npm run assets`, but not at browser
   fetch time. A `crypto.subtle` check could be added, at the cost of hashing
@@ -864,9 +873,9 @@ without a Wasm import object.
 
 ```sh
 node serve.mjs
-# http://localhost:8001/          minikotlin
-# http://localhost:8001/real.html real K2 (Wasm)
-# http://localhost:8001/packages/kotlin-wasm/example/js.html real K2 (JS)
+# http://localhost:8001/                          real K2 (Wasm, switch to JavaScript in the page)
+# http://localhost:8001/minikotlin.html           minikotlin
+# http://localhost:8001/packages/kotlin-wasm/example/js.html package JS target
 ```
 
 ### minikotlin test

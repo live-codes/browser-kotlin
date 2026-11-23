@@ -24,13 +24,12 @@ function assertNode() {
       'Kotlin (Wasm) needs Node 22 or later: the compiler image uses the exception-handling proposal.'
     );
   }
-  const flag = '--experimental-wasm-exnref';
-  const hasFlag =
-    process.execArgv.includes(flag) ||
-    (process.env.NODE_OPTIONS || '').split(/\s+/).includes(flag);
-  if (!hasFlag) {
+  // Node 24 enables WebAssembly exceptions by default; older versions need the
+  // flag. Test the capability rather than the command line: `node --test` runs
+  // each file in a child process that does not repeat the parent's execArgv.
+  if (typeof WebAssembly.Exception !== 'function' || typeof WebAssembly.Tag !== 'function') {
     throw new KotlinUnsupportedError(
-      'Node needs the WebAssembly exception-handling flag. Run with ' +
+      'Node needs WebAssembly exception handling. On Node 22–23, run with ' +
         '`node --experimental-wasm-exnref your-app.mjs`, or add it to NODE_OPTIONS.'
     );
   }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Kotlin in the browser — proof of concept</title>
+<title>Kotlin in the browser — real K2 compiler</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -32,16 +32,19 @@
                   font: 13px/1.45 ui-monospace, Consolas, monospace; tab-size: 4;
                   white-space: pre; overflow: auto; color: inherit; }
   textarea { flex: 1; resize: none; outline: none; }
-  #src { flex: 1; }
   #out { flex: 1; white-space: pre-wrap; }
+  #js { flex: 1; white-space: pre-wrap; }
   #diag { flex: 0 1 auto; max-height: 42%; color: var(--err); border-top: 1px solid var(--line); white-space: pre-wrap; }
   [hidden] { display: none !important; }
   select, button { font: 12px system-ui; padding: 4px 10px; }
   button { font-weight: 600; }
+  label { font-size: 12px; color: var(--dim); }
   kbd { font: 11px ui-monospace, monospace; color: var(--dim); }
-  a { color: var(--accent); }
   .pill { font-size: 11px; color: var(--dim); }
   .spacer { flex: 1; }
+  a { color: var(--accent); }
+  .banner { padding: 8px 16px; font-size: 12px; border-bottom: 1px solid var(--line);
+            background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--dim); }
   @media (max-width: 700px) {
     main { flex-direction: column; }
     section + section { border-left: 0; border-top: 1px solid var(--line); }
@@ -50,14 +53,24 @@
 </head>
 <body>
 <header>
-  <h1>Kotlin → WebAssembly, compiled in the browser</h1>
+  <h1>Kotlin with the real K2 compiler, in the browser</h1>
   <select id="examples" title="Load an example" aria-label="Load an example"></select>
+  <label for="target">Output</label>
+  <select id="target" title="Compiler output target" aria-label="Compiler output target">
+    <option value="wasm" selected>Wasm</option>
+    <option value="js">JavaScript</option>
+  </select>
   <button id="run" disabled>Run <kbd>Ctrl+Enter</kbd></button>
   <span id="status">starting…</span>
   <span class="spacer"></span>
-  <a href="./real.html">real K2 compiler →</a>
-  <span class="pill">minikotlin subset · no server · WasmGC</span>
+  <a href="./minikotlin.html">minikotlin demo →</a>
 </header>
+
+<div class="banner" id="banner">
+  First visit downloads the real Kotlin compiler as WebAssembly (~85 MB). It is cached
+  by the browser; nothing is sent to a server. <strong>JavaScript</strong> uses K2's
+  Kotlin/JS backend and shows the emitted <code>main.mjs</code>.
+</div>
 
 <main>
   <section>
@@ -66,196 +79,145 @@
               aria-label="Kotlin source"></textarea>
   </section>
   <section>
-    <h2>Output</h2>
+    <h2 id="out-title">Output</h2>
     <pre id="out">Press Run to compile and execute this program.</pre>
     <pre id="diag" hidden></pre>
+  </section>
+  <section id="js-section" hidden>
+    <h2>Compiled JavaScript — run by this page</h2>
+    <pre id="js">Run with the JavaScript target to see the emitted module.</pre>
   </section>
 </main>
 
 <script type="module">
+import { createCompiler } from './packages/kotlin-wasm/src/index.js';
+
+const ASSETS = new URL('./packages/kotlin-wasm/assets/', location.href).href;
+const RUN_TIMEOUT_MS = 15000;
+
 const EXAMPLES = [
-  ['Hello, values', `
-data class Point(val x: Int, val y: Int)
-
+  ['Hello, real Kotlin', `
 fun main() {
-    println("hello from Kotlin in the browser")
-    val points = listOf(Point(1, 2), Point(3, 4))
-    points.forEach { p -> println("$p -> \${p.x + p.y}") }
-    for (i in 1..5) println("$i squared = \${i * i}")
+    val name = "Kotlin"
+    println("Hello, $name! This was compiled by the real K2 compiler inside the browser.")
+    val squares = (1..5).map { it * it }
+    println("squares = $squares")
 }
 `],
-  ['Classes & polymorphism', `
-open class Animal(val name: String) {
-    open fun sound(): String = "..."
-}
-
-class Dog(name: String) : Animal(name) {
-    override fun sound(): String = "Woof"
-}
-
-class Cat(name: String) : Animal(name) {
-    override fun sound(): String = "Meow"
-}
+  ['Data class & collections', `
+data class Person(val name: String, val age: Int)
 
 fun main() {
-    val animals = listOf<Animal>(Animal("Generic"), Dog("Rex"), Cat("Milo"))
-    for (a in animals) println("\${a.name}: \${a.sound()}")
+    val people = listOf(
+        Person("Alice", 29), Person("Bob", 31),
+        Person("Carol", 24), Person("Dave", 31),
+    )
+    println(people.groupBy { it.age })
+    println("oldest: " + people.maxBy { it.age })
+    println(people.sortedBy { it.name }.map { it.name.uppercase() })
+    println("average age: " + people.map { it.age }.average())
 }
 `],
-  ['Sealed shapes & when', `
-sealed class Shape
-class Circle(val r: Double) : Shape()
-class Rect(val w: Double, val h: Double) : Shape()
+  ['Sealed classes & when', `
+import kotlin.math.PI
 
-fun area(s: Shape): Double = when (s) {
-    is Circle -> 3.14159 * s.r * s.r
-    is Rect -> s.w * s.h
+sealed class Shape {
+    abstract fun area(): Double
+}
+
+data class Circle(val radius: Double) : Shape() {
+    override fun area() = PI * radius * radius
+}
+
+data class Rect(val width: Double, val height: Double) : Shape() {
+    override fun area() = width * height
+}
+
+fun describe(shape: Shape): String = when (shape) {
+    is Circle -> "circle r=\${shape.radius}"
+    is Rect -> "rect \${shape.width}x\${shape.height}"
 }
 
 fun main() {
     val shapes: List<Shape> = listOf(Circle(2.0), Rect(3.0, 4.0))
-    for (s in shapes) {
-        val label = when (s) {
-            is Circle -> "circle r=\${s.r}"
-            is Rect -> "rect \${s.w}x\${s.h}"
-        }
-        println("$label -> area \${area(s)}")
+    for (shape in shapes) {
+        println("\${describe(shape)} -> area \${shape.area()}")
     }
 }
 `],
-  ['Collections', `
-fun main() {
-    val xs = listOf(5, 3, 9, 1, 7, 8)
-    println("xs       = $xs")
-    println("sorted   = \${xs.sorted()}")
-    println("evens    = \${xs.filter { it % 2 == 0 }}")
-    println("squares  = \${xs.map { it * it }}")
-    println("sum      = \${xs.sum()}")
-    println("max      = \${xs.max()}")
+  ['Generics & stdlib', `
+class Pmf<T>(private val probs: Map<T, Double>) {
+    operator fun get(x: T): Double = probs[x] ?: 0.0
+
+    fun normalized(): Pmf<T> {
+        val total = probs.values.sum()
+        return Pmf(probs.mapValues { it.value / total })
+    }
+
+    operator fun times(likelihood: (T) -> Double) =
+        Pmf(probs.mapValues { (x, p) -> p * likelihood(x) })
+
+    fun mean(toDouble: (T) -> Double) =
+        probs.entries.sumOf { toDouble(it.key) * it.value }
+
+    override fun toString() =
+        probs.entries.joinToString("\\n") { "\${it.key}\\t\${it.value}" }
 }
-`],
-  ['Null safety', `
-fun parse(s: String): Int? = if (s == "") null else s.toIntOrNull()
 
 fun main() {
-    val values = listOf("42", "", "7")
-    for (v in values) {
-        val n = parse(v)
-        val shown = if (v == "") "<empty>" else v
-        println("$shown -> \${n?.let { it * 2 } ?: -1}")
-    }
-    val name: String? = null
-    println("name length = \${name?.length ?: 0}")
+    val hypotheses = (0..10).map { it / 10.0 }
+    val prior = Pmf(hypotheses.associateWith { 1.0 })
+    val posterior = (prior * { p -> p }).normalized()
+    println(posterior)
+    println("mean = \${posterior.mean { it }}")
 }
 `],
-  ['Coroutines', `
-import kotlinx.coroutines.*
+  ['kotlin.math', `
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
-fun main() = runBlocking {
-    println("start")
-    coroutineScope {
-        launch {
-            delay(300)
-            println("slow lane")
-        }
-        launch {
-            delay(100)
-            println("fast lane")
-        }
+fun choose(n: Int, k: Int): Long =
+    (1..k).fold(1L) { acc, i -> acc * (n - k + i) / i }
+
+fun binomPmf(k: Int, n: Int, p: Double): Double =
+    choose(n, k) * p.pow(k) * (1 - p).pow(n - k)
+
+fun main() {
+    val n = 10
+    val p = 0.5
+    for (k in 0..n) {
+        val prob = binomPmf(k, n, p)
+        val bar = "#".repeat((prob * 100).toInt())
+        val rounded = (prob * 10000).roundToInt() / 10000.0
+        println("k=\${k.toString().padStart(2)}  \${rounded.toString().padEnd(6)}  $bar")
     }
-    println("done")
 }
 `],
-  ['Diagnostics: unresolved name', `
+  ['Diagnostics: type error', `
 fun main() {
-    println(missingFunction(42))
+    val count: Int = "three"
+    println(count)
+    println(undefinedThing)
 }
 `],
 ];
 
 const $ = (id) => document.getElementById(id);
-const srcEl = $('src'), outEl = $('out'), diagEl = $('diag'),
-      statusEl = $('status'), runBtn = $('run'), examplesEl = $('examples');
+const srcEl = $('src'), outEl = $('out'), jsEl = $('js'), diagEl = $('diag'),
+      statusEl = $('status'), runBtn = $('run'), examplesEl = $('examples'),
+      targetEl = $('target'), jsSection = $('js-section'), bannerEl = $('banner'),
+      outTitle = $('out-title');
 
-// A Kotlin program can loop forever. The compiler and the program share one
-// worker, so the only reliable way out is to terminate it and start a fresh one.
-const RUN_TIMEOUT_MS = 15000;
-
-let worker = null;
+let compiler = null;
+let activeTarget = null;
 let ready = false;
 let busy = false;
-let watchdog = 0;
-let startedAt = 0;
 
 function setStatus(text, state = '') {
   statusEl.textContent = text;
   statusEl.toggleAttribute('data-busy', state === 'busy');
   statusEl.toggleAttribute('data-ok', state === 'ok');
   statusEl.toggleAttribute('data-err', state === 'err');
-}
-
-function makeWorker() {
-  const w = new Worker('./runner.js', { type: 'module' });
-  w.onmessage = ({ data }) => onMessage(data);
-  w.onerror = (event) => {
-    busy = false;
-    ready = false;
-    runBtn.disabled = true;
-    setStatus('worker error: ' + (event.message || 'unknown'), 'err');
-    showDiagnostics(event.message || 'The worker failed to start.');
-  };
-  w.onmessageerror = () => {
-    busy = false;
-    ready = false;
-    runBtn.disabled = true;
-    setStatus('worker message error', 'err');
-  };
-  return w;
-}
-
-function start() {
-  ready = false;
-  runBtn.disabled = true;
-  setStatus('loading compiler (1.9 MB)…', 'busy');
-  worker.postMessage({ type: 'init' });
-}
-
-function onMessage(message) {
-  switch (message.type) {
-    case 'ready':
-      ready = true;
-      runBtn.disabled = false;
-      setStatus('ready · compiler v' + message.version, 'ok');
-      break;
-
-    case 'status':
-      if (message.stage === 'compiling') setStatus('compiling…', 'busy');
-      else if (message.stage === 'running') setStatus('running…', 'busy');
-      break;
-
-    case 'compiled':
-      setStatus('compiled ' + formatBytes(message.bytes) + ' · running…', 'busy');
-      break;
-
-    case 'output':
-      appendOutput(message.text);
-      break;
-
-    case 'result':
-      clearTimeout(watchdog);
-      busy = false;
-      runBtn.disabled = !ready;
-      renderResult(message, performance.now() - startedAt);
-      break;
-
-    case 'fatal':
-      clearTimeout(watchdog);
-      busy = false;
-      runBtn.disabled = !ready;
-      showDiagnostics(message.message);
-      setStatus('error', 'err');
-      break;
-  }
 }
 
 function formatBytes(n) {
@@ -267,7 +229,7 @@ function formatMs(n) {
 }
 
 function appendOutput(text) {
-  outEl.textContent += text;
+  outEl.textContent += text + '\n';
   outEl.scrollTop = outEl.scrollHeight;
 }
 
@@ -277,59 +239,202 @@ function showDiagnostics(text) {
   diagEl.hidden = !clean;
 }
 
-function renderResult(result, totalMs) {
-  if (result.errors?.length) {
-    const lines = result.errors.map((e) => {
-      const where = e.line ? `${e.file || 'Main.kt'}:${e.line}:${e.col || 0}` : '';
-      return (where ? where + '  ' : '') + e.message;
-    });
-    showDiagnostics(lines.join('\n'));
-    setStatus(`compile error (${result.errors.length}) · ${formatMs(result.compileMs)}`, 'err');
-    return;
-  }
-
-  if (result.runtimeError) {
-    showDiagnostics('runtime error: ' + result.runtimeError);
-    setStatus('runtime error · ' + formatBytes(result.bytes), 'err');
-    return;
-  }
-
-  if (!result.hasMain) {
-    setStatus('compiled, but there is no fun main()', 'err');
-    return;
-  }
-
-  if (outEl.textContent.trim() === '') {
-    outEl.textContent = '(no output)';
-  }
-  showDiagnostics('');
-  setStatus(
-    `ok · compile ${formatMs(result.compileMs)} · run ${formatMs(result.runMs)} · ${formatBytes(result.bytes)}`,
-    'ok'
-  );
+function selectedTarget() {
+  return targetEl.value === 'js' ? 'js' : 'wasm';
 }
 
-function run() {
-  if (!ready || busy) return;
+function updateLayout() {
+  const target = selectedTarget();
+  jsSection.hidden = target !== 'js';
+  outTitle.textContent = target === 'js' ? 'Program output' : 'Output';
+  if (target !== 'js') jsEl.textContent = 'Run with the JavaScript target to see the emitted module.';
+}
+
+// One compiler per target; switching output swaps it and releases the old worker.
+async function getCompiler() {
+  const target = selectedTarget();
+  if (compiler && activeTarget === target) return compiler;
+
+  compiler?.dispose();
+  compiler = null;
+  activeTarget = target;
+  ready = false;
+  runBtn.disabled = true;
+  bannerEl.hidden = true;
+  setStatus(`loading real K2 compiler (${target}, ~85 MB first visit)…`, 'busy');
+
+  const created = await createCompiler({
+    target,
+    baseUrl: ASSETS,
+    onProgress: (value) =>
+      setStatus(`loading real K2 compiler (${target})… ${Math.round(value * 100)}%`, 'busy'),
+  });
+  compiler = created;
+  ready = true;
+  runBtn.disabled = busy;
+  setStatus(`ready · real K2 compiler ${created.compilerVersion} · ${target}`, 'ok');
+  return created;
+}
+
+// Run a module worker and stream its console output to the page.
+function runModule(runner, urls, onOutput, timeoutMs = RUN_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    const worker = new Worker(runner, { type: 'module' });
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker.terminate();
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      resolve(error);
+    };
+    const timer = setTimeout(
+      () => finish(`program did not finish within ${timeoutMs / 1000} s — stopped`),
+      timeoutMs
+    );
+    worker.onmessage = ({ data }) => {
+      if (data.done) finish(data.error || null);
+      else onOutput(data.output, data.level);
+    };
+    worker.onerror = (event) => finish(event.message || 'the program worker failed to start');
+  });
+}
+
+// Wasm: the compiler emits main.wasm plus JS glue. Rewrite its relative imports
+// to Blob URLs and import main.mjs in a module worker.
+async function runWasm(files) {
+  const file = (name) => {
+    const found = files.find((f) => f.name === name);
+    if (!found) throw new Error('compiler did not emit ' + name);
+    return found.content;
+  };
+  const bytes = (name) => Uint8Array.from(atob(file(name)), (c) => c.charCodeAt(0));
+  const text = (name) => new TextDecoder().decode(bytes(name));
+  const urls = [];
+  const blob = (content, type) => {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    urls.push(url);
+    return url;
+  };
+
+  const wasm = blob(bytes('main.wasm'), 'application/wasm');
+  const builtins = blob(text('main.js-builtins.mjs'), 'text/javascript');
+  const imports = blob(
+    text('main.import-object.mjs').replaceAll("'./main.js-builtins.mjs'", `'${builtins}'`),
+    'text/javascript'
+  );
+  const main = blob(
+    text('main.mjs')
+      .replaceAll("'./main.import-object.mjs'", `'${imports}'`)
+      .replaceAll("new URL('./main.wasm',import.meta.url).href", `'${wasm}'`),
+    'text/javascript'
+  );
+  urls.push(
+    blob(`
+      for (const level of ['log', 'info', 'warn', 'error', 'debug'])
+        console[level] = (...values) => postMessage({ output: values.map(String).join(' '), level });
+      try { await import(${JSON.stringify(main)}); postMessage({ done: true }); }
+      catch (error) { postMessage({ done: true, error: String(error && error.stack || error) }); }
+    `, 'text/javascript')
+  );
+
+  return runModule(urls[urls.length - 1], urls, (line, level) => {
+    appendOutput(line);
+    if (level === 'error') showDiagnostics(line);
+  });
+}
+
+// JS: the compiler emits one self-contained main.mjs. This page runs it itself,
+// the way a result page would: import it as a module in a fresh worker.
+async function runJavaScript(files) {
+  const module =
+    files.find((f) => f.name === 'main.mjs') || files.find((f) => /\.m?js$/.test(f.name));
+  if (!module) throw new Error('compiler did not emit a JavaScript module');
+
+  jsEl.textContent = module.content;
+
+  const main = URL.createObjectURL(new Blob([module.content], { type: 'text/javascript' }));
+  const runner = URL.createObjectURL(new Blob([`
+    globalThis.write = (message) => postMessage({ output: String(message), level: 'log' });
+    for (const level of ['log', 'info', 'warn', 'error', 'debug'])
+      console[level] = (...values) => postMessage({ output: values.map(String).join(' '), level });
+    try { await import(${JSON.stringify(main)}); postMessage({ done: true }); }
+    catch (error) { postMessage({ done: true, error: String(error && error.stack || error) }); }
+  `], { type: 'text/javascript' }));
+
+  return runModule(runner, [main, runner], (line, level) => {
+    appendOutput(line);
+    if (level === 'error') showDiagnostics(line);
+  });
+}
+
+function fileSize(files, name) {
+  const file = files.find((f) => f.name === name);
+  if (!file) return 0;
+  if (file.encoding === 'utf8') return file.content.length;
+  const padding = file.content.endsWith('==') ? 2 : file.content.endsWith('=') ? 1 : 0;
+  return Math.floor(file.content.length * 3 / 4) - padding;
+}
+
+async function run() {
+  if (busy) return;
   busy = true;
   runBtn.disabled = true;
   outEl.textContent = '';
   showDiagnostics('');
-  startedAt = performance.now();
-  setStatus('compiling…', 'busy');
-  worker.postMessage({ type: 'run', source: srcEl.value, filename: 'Main.kt' });
+  setStatus('loading…', 'busy');
 
-  clearTimeout(watchdog);
-  watchdog = setTimeout(() => {
-    worker.terminate();
-    worker = makeWorker();
+  try {
+    const current = await getCompiler();
+    setStatus('compiling…', 'busy');
+    const compiled = await current.compile(srcEl.value);
+
+    if (compiled.errors.length) showDiagnostics(compiled.errors.join('\n'));
+    if (!compiled.ok) {
+      setStatus(`compile failed · ${formatMs(compiled.compileMs)}`, 'err');
+      return;
+    }
+
+    const target = compiled.target;
+    const runStart = performance.now();
+    if (target === 'js') {
+      setStatus('compiled JavaScript · running it in a worker…', 'busy');
+      const error = await runJavaScript(compiled.files);
+      if (error) {
+        showDiagnostics(error);
+        setStatus('runtime error', 'err');
+        return;
+      }
+      if (outEl.textContent.trim() === '') outEl.textContent = '(no output)';
+      setStatus(
+        `ok · js · compile ${formatMs(compiled.compileMs)} · run ${formatMs(performance.now() - runStart)} · ` +
+          formatBytes(fileSize(compiled.files, 'main.mjs')) + ' js',
+        'ok'
+      );
+      return;
+    }
+
+    setStatus('running…', 'busy');
+    const error = await runWasm(compiled.files);
+    if (error) {
+      showDiagnostics(error);
+      setStatus('runtime error', 'err');
+      return;
+    }
+    if (outEl.textContent.trim() === '') outEl.textContent = '(no output)';
+    setStatus(
+      `ok · wasm · compile ${formatMs(compiled.compileMs)} · run ${formatMs(performance.now() - runStart)} · ` +
+        formatBytes(fileSize(compiled.files, 'main.wasm')) + ' wasm',
+      'ok'
+    );
+  } catch (error) {
+    showDiagnostics(error?.message || String(error));
+    setStatus('failed', 'err');
+  } finally {
     busy = false;
-    ready = false;
-    runBtn.disabled = true;
-    outEl.textContent = `(program did not finish within ${RUN_TIMEOUT_MS / 1000} s — stopped)`;
-    setStatus('timed out; restarting compiler…', 'err');
-    start();
-  }, RUN_TIMEOUT_MS);
+    runBtn.disabled = !ready;
+  }
 }
 
 for (const [label] of EXAMPLES) {
@@ -347,6 +452,19 @@ examplesEl.addEventListener('change', () => loadExample(examplesEl.selectedIndex
 examplesEl.selectedIndex = 0;
 loadExample(0);
 
+targetEl.addEventListener('change', () => {
+  updateLayout();
+  compiler?.dispose();
+  compiler = null;
+  activeTarget = null;
+  ready = false;
+  // Run loads the newly selected compiler itself, so keep the button usable.
+  runBtn.disabled = busy;
+  outEl.textContent = '';
+  showDiagnostics('');
+  setStatus(`target changed · press Run to load the ${selectedTarget()} compiler`);
+});
+
 runBtn.addEventListener('click', run);
 addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
@@ -355,7 +473,6 @@ addEventListener('keydown', (event) => {
   }
 });
 
-// Keep Tab in the editor (insert a real tab) instead of moving focus away.
 srcEl.addEventListener('keydown', (event) => {
   if (event.key !== 'Tab') return;
   event.preventDefault();
@@ -363,8 +480,11 @@ srcEl.addEventListener('keydown', (event) => {
   srcEl.setRangeText('\t', start, end, 'end');
 });
 
-worker = makeWorker();
-start();
+updateLayout();
+getCompiler().catch((error) => {
+  showDiagnostics(error?.message || String(error));
+  setStatus('compiler failed to load', 'err');
+});
 </script>
 </body>
 </html>

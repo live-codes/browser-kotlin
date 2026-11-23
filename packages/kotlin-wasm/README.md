@@ -217,9 +217,10 @@ over 20 MB, can host them. The wrapper concatenates and inflates them with
 node --experimental-wasm-exnref your-app.mjs
 ```
 
-The compiler image uses WebAssembly exception handling, which V8 still gates
-behind `--experimental-wasm-exnref` in Node. The package's `test` script passes
-it. Node 22 or later is required.
+The compiler image uses WebAssembly exception handling. Node 24 enables it by
+default; Node 22–23 needs `--experimental-wasm-exnref`, which the package's
+`test` script passes. The package detects the capability at runtime, so Node 24+
+works without the flag. Node 22 or later is required.
 
 ```js
 import { createCompiler } from '@live-codes/kotlin-wasm';
@@ -286,8 +287,9 @@ Program runs are tens of milliseconds.
 - **WasmGC is required for the compiler** — Chrome/Edge 119+, Firefox 120+,
   Safari 18.2+ — plus `DecompressionStream` and nested workers. The JS target's
   emitted program does not need WasmGC, but the compiler image does.
-- **Node needs `--experimental-wasm-exnref`** and Node 22+ for the compiler image
-  on both targets.
+- **Node needs WebAssembly exception handling** for the compiler image on both
+  targets: built in on Node 24+, `--experimental-wasm-exnref` on Node 22–23.
+  Node 22+ is required.
 - **Licensing must be cleared before shipping.** See
   [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 
