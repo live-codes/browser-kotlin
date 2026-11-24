@@ -75,25 +75,25 @@
         ":compiler-host:jsWebImage"
       ],
       "heap": "8g",
-      "built": "2026-11-24T19:07:54Z"
+      "built": "2026-11-24T21:47:46Z"
     },
     "assets": {
       "compilerImage": {
         "gzParts": [
           {
             "file": "kotlin-compiler-worker.js.wasm.gz.0",
-            "bytes": 14833333,
-            "sha256": "5e9fab9b6d761d90bd0673790e50ba805890424bca0fddcfd9ad54ad7bf54b76"
+            "bytes": 14843551,
+            "sha256": "1935ef41a3645d8ca8eb88fd1252a6e21b79153731e7444cd12f4531facd245c"
           },
           {
             "file": "kotlin-compiler-worker.js.wasm.gz.1",
-            "bytes": 14833333,
-            "sha256": "bb2c3386b17ad04ae4805d223a96f8075b04f8d09e065c5151026046397d26ea"
+            "bytes": 14843551,
+            "sha256": "ae589a6138c98cea190c4aa81a545bc5f3c2a49f12ef45ac55cb8366ae5a76bd"
           }
         ],
-        "gzBytes": 29666666,
-        "rawBytes": 75985645,
-        "rawSha256": "c33c79e04c88b47119ca097abd34ea008911929d0ba2aab38920666fe9e1f000"
+        "gzBytes": 29687102,
+        "rawBytes": 75993025,
+        "rawSha256": "084f21aadcb264d44868d3c246b6fd314d876655c7b8a647e78e6410c5ffb95a"
       },
       "stdlib": {
         "file": "kotlin-stdlib-js.bin.gz",
@@ -115,7 +115,7 @@
     "manifest": {
       "file": "kotlin-assets.json",
       "bytes": 462,
-      "sha256": "98e31c7e73cab39712bf644ff6427ac5615d3ad4d1d522baf3d1ecc1add46d97"
+      "sha256": "aec0ea5136cd86f92a2bd1b4af9560b464a946ab868b99342056846ac2fc2f15"
     }
   }
 }

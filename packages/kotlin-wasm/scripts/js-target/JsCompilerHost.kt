@@ -46,10 +46,10 @@ private const val JS_FILE_NAME = "main.kt"
  */
 private val JS_PRELUDE: Map<String, String> = mapOf(
     "system.kt" to """
-@JsFun("(text, isErr) => globalThis.__kotlinWrite(text, isErr)")
+@JsFun("(text, isErr) => { const hook = globalThis.__kotlinWrite; if (typeof hook === 'function') { hook(text, isErr); return; } const line = text.charCodeAt(text.length - 1) === 10 ? text.slice(0, -1) : text; (isErr ? console.error : console.log)(line); }")
 external fun __kotlinWrite(text: String, isErr: Boolean)
 
-@JsFun("(code) => globalThis.__kotlinExit(code)")
+@JsFun("(code) => { const hook = globalThis.__kotlinExit; if (typeof hook === 'function') hook(code); }")
 external fun __kotlinExit(code: Int)
 
 object System {
@@ -67,7 +67,7 @@ class __KotlinPrintStream(private val isErr: Boolean) {
 }
 """,
     "stdin.kt" to """
-@JsFun("() => globalThis.__kotlinReadLine()")
+@JsFun("() => { const hook = globalThis.__kotlinReadLine; return typeof hook === 'function' ? hook() : null; }")
 external fun __kotlinReadLine(): String?
 
 fun readLine(): String? = __kotlinReadLine()

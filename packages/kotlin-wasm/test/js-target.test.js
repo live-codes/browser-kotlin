@@ -41,3 +41,28 @@ test('js target reports compiler diagnostics', async () => {
     compiler.dispose();
   }
 });
+
+test('the JVM conveniences run without any host hooks', async () => {
+  // A host like LiveCodes runs the emitted module as a plain script and defines
+  // none of the __kotlin* hooks. The shims must fall back to the console rather
+  // than throw "globalThis.__kotlinWrite is not a function".
+  const compiler = await createCompiler({ target: 'js' });
+  try {
+    const result = await compiler.run(
+      `fun main() {
+    System.out.println("to stdout")
+    System.err.println("to stderr")
+    println("readLine=" + readLine())
+}`,
+      '',
+      { timeoutMs: 60000, compileTimeoutMs: 180000 },
+    );
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.exitCode, 0, 'the program completes');
+    assert.match(result.stdout, /to stdout/);
+    assert.match(result.stderr, /to stderr/);
+    assert.match(result.stdout, /readLine=null/);
+  } finally {
+    compiler.dispose();
+  }
+});
