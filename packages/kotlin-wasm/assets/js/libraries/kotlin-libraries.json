@@ -1,0 +1,130 @@
+{
+  "libraries": {
+    "kotlin-dom-api-compat": {
+      "version": "2.5.0-RC",
+      "dependsOn": [],
+      "importRoots": [
+        "kotlin"
+      ],
+      "file": "kotlin-dom-api-compat.bin.gz",
+      "gzBytes": 897007,
+      "rawBytes": 2777198,
+      "rawSha256": "f1f9148008ada2adbeb4052f187b825e697b75d73cbb4f232142515d6ccb9f1f"
+    },
+    "kotlinx-browser": {
+      "version": "0.5.0",
+      "dependsOn": [
+        "kotlin-dom-api-compat"
+      ],
+      "importRoots": [
+        "kotlinx.browser"
+      ],
+      "file": "kotlinx-browser.bin.gz",
+      "gzBytes": 959720,
+      "rawBytes": 2928698,
+      "rawSha256": "7d305101b38a6cf321c2841e2d258dc645601cfd437c52f639dbc9514dade107"
+    },
+    "kotlinx-html": {
+      "version": "0.12.0",
+      "dependsOn": [
+        "kotlin-dom-api-compat"
+      ],
+      "importRoots": [
+        "kotlinx.html"
+      ],
+      "file": "kotlinx-html.bin.gz",
+      "gzBytes": 560188,
+      "rawBytes": 1791518,
+      "rawSha256": "4beeea9dc190dae1df0a34995ba33b31a1cc548073e8f19d570c020d1c9d42cd"
+    },
+    "atomicfu": {
+      "version": "0.33.0",
+      "dependsOn": [
+        "kotlin-dom-api-compat"
+      ],
+      "importRoots": [
+        "kotlinx.atomicfu"
+      ],
+      "file": "atomicfu.bin.gz",
+      "gzBytes": 35979,
+      "rawBytes": 87747,
+      "rawSha256": "b3edc033b68a84879cc1e85bba6a0592c7bb05b3be8d4e0bebab6b26fb882687"
+    },
+    "kotlinx-coroutines-core": {
+      "version": "1.11.0",
+      "dependsOn": [
+        "kotlin-dom-api-compat",
+        "atomicfu"
+      ],
+      "importRoots": [
+        "kotlinx.coroutines"
+      ],
+      "file": "kotlinx-coroutines-core.bin.gz",
+      "gzBytes": 812319,
+      "rawBytes": 2028585,
+      "rawSha256": "5e990bf104cb47cb9ab49ec78ae52e9072412af5211a54b049c5c02e1f2256a5"
+    },
+    "kotlinx-collections-immutable": {
+      "version": "0.5.2",
+      "dependsOn": [
+        "kotlin-dom-api-compat"
+      ],
+      "importRoots": [
+        "kotlinx.collections.immutable"
+      ],
+      "file": "kotlinx-collections-immutable.bin.gz",
+      "gzBytes": 302292,
+      "rawBytes": 862039,
+      "rawSha256": "22c21cef0b32bd4bcaf2d8ebfc831776e4bfd625e1d12629eeac6949aa962c6c"
+    },
+    "kotlinx-serialization-core": {
+      "version": "1.13.0",
+      "dependsOn": [],
+      "importRoots": [
+        "kotlinx.serialization"
+      ],
+      "file": "kotlinx-serialization-core.bin.gz",
+      "gzBytes": 286496,
+      "rawBytes": 752681,
+      "rawSha256": "cd478832ae88d5bc9df12737c0770cbdcb9de8191becef9e273a7f7f1f600789"
+    },
+    "kotlinx-serialization-json": {
+      "version": "1.13.0",
+      "dependsOn": [
+        "kotlinx-serialization-core"
+      ],
+      "importRoots": [
+        "kotlinx.serialization.json"
+      ],
+      "file": "kotlinx-serialization-json.bin.gz",
+      "gzBytes": 335852,
+      "rawBytes": 865407,
+      "rawSha256": "7845cd2856104f9f47668fc9a8dfa624ee7cd623846f1717748cf6d3e8385569"
+    },
+    "kotlinx-datetime": {
+      "version": "0.8.0",
+      "dependsOn": [
+        "kotlinx-serialization-core",
+        "kotlin-dom-api-compat"
+      ],
+      "importRoots": [
+        "kotlinx.datetime"
+      ],
+      "file": "kotlinx-datetime.bin.gz",
+      "gzBytes": 599928,
+      "rawBytes": 1655392,
+      "rawSha256": "72e2843c9aa7dc90dba28ec08ca0821c3a840c33160246a0a7e8eacb1fa5e874"
+    },
+    "kotlin-test": {
+      "version": "2.5.0-RC",
+      "dependsOn": [],
+      "importRoots": [
+        "kotlin.test"
+      ],
+      "file": "kotlin-test.bin.gz",
+      "gzBytes": 88230,
+      "rawBytes": 237453,
+      "rawSha256": "b87c2a9d47ce85f7f1968daccf812def63e5af4b53a6b424aba681c030370dac"
+    }
+  }
+}

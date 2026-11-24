@@ -126,19 +126,103 @@ export async function createInWorkerCompiler(options = {}) {
   if (init.error) throw new KotlinWasmError(init.error);
   if (onProgress) onProgress(1);
 
+  // Optional libraries are downloaded on demand, so a program that does not use
+  // them pays nothing. The index is small; the archives are not.
+  let libraryIndex = null;
+  const loadedLibraries = new Set();
+
+  async function loadLibrary(name, dependencies) {
+    if (loadedLibraries.has(name)) return;
+    for (const dependency of dependencies) {
+      await loadLibrary(dependency, libraryIndex.libraries[dependency]?.dependsOn ?? []);
+    }
+    const entry = libraryIndex.libraries[name];
+    if (!entry) throw new KotlinWasmError(`Unknown Kotlin library '${name}'.`);
+    const archive = await inflate(await fetchBytes(new URL(entry.file, baseUrl + 'libraries/')));
+    const answer = JSON.parse(
+      globalThis.kotlinCompilerHost.call('addLibraries', toBase64(archive), name)
+    );
+    if (answer.error) throw new KotlinWasmError(answer.error);
+    loadedLibraries.add(name);
+  }
+
+  /**
+   * Picks and ranks the libraries a failed compile was missing.
+   *
+   * The diagnostic truncates to one segment: `import kotlinx.browser.document`
+   * reports `unresolved reference 'kotlinx'`, and only a longer reference like
+   * `kotlinx.serialization` reports two. So a library matches when its declared
+   * root starts with what the compiler reported. Several can match the same
+   * report, hence the ranking: the library whose root is *closest* to the
+   * reference is the one the program actually imported, and loading its closure
+   * brings the shared dependencies along.
+   */
+  function missingLibraries(diagnostics) {
+    const text = (diagnostics || [])
+      .filter((diagnostic) => diagnostic.severity === 'ERROR')
+      .map((diagnostic) => diagnostic.message)
+      .join('\n');
+    // The compiler capitalises the message: "Unresolved reference 'kotlinx'."
+    const reported = [...text.matchAll(/unresolved reference '([\w.]+)'/gi)].map((m) => m[1]);
+    if (!reported.length) return [];
+
+    const candidates = [];
+    for (const reference of reported) {
+      for (const [name, entry] of Object.entries(libraryIndex.libraries)) {
+        if (loadedLibraries.has(name)) continue;
+        const root = entry.importRoots.find(
+          (importRoot) => importRoot === reference || importRoot.startsWith(reference + '.'),
+        );
+        // The report is truncated, so `kotlinx` is a prefix of every kotlinx
+        // library. Rank by how few segments the root has: `kotlinx.browser` is
+        // likelier to be what was imported than `kotlinx.serialization.json`.
+        if (root) candidates.push({ name, segments: root.split('.').length });
+      }
+    }
+    candidates.sort((a, b) => a.segments - b.segments);
+    return [...new Set(candidates.map((candidate) => candidate.name))];
+  }
+
+  async function ensureLibraryIndex() {
+    libraryIndex ??= JSON.parse(
+      new TextDecoder().decode(await fetchBytes(new URL('kotlin-libraries.json', baseUrl + 'libraries/')))
+    );
+    return libraryIndex;
+  }
+
   return {
     target,
 
     /**
      * Compile one program. Returns `{ ok, compileMs, errors, files }` with
      * `main.mjs` decoded to UTF-8 text.
+     *
+     * A compile that fails on one of our optional libraries transparently
+     * downloads it and retries, so the user never sees the error it caused.
      */
     compile: async (code, { fileName = DEFAULT_FILE_NAME } = {}) => {
       if (typeof code !== 'string') {
         throw new KotlinWasmError('compile() needs the program source as its first argument.');
       }
-      const answer = JSON.parse(globalThis.kotlinCompilerHost.call('compile', code, ''));
+      await ensureLibraryIndex();
+
+      let answer = JSON.parse(globalThis.kotlinCompilerHost.call('compile', code, ''));
       if (answer.error) throw new KotlinWasmError(answer.error);
+
+      // Only a missing library is retried, and only a few times: a genuinely
+      // broken program must not loop, and each retry costs a compile.
+      //
+      // One candidate per attempt. The truncation means a single report can name
+      // a whole family, and loading the family would download megabytes for a
+      // program that imported one. Retrying after each candidate stops as soon
+      // as the program resolves, so only the closure it truly needs is fetched.
+      for (let attempt = 0; !answer.ok && attempt < 6; attempt += 1) {
+        const [library] = missingLibraries(answer.diagnostics);
+        if (!library) break;
+        await loadLibrary(library, libraryIndex.libraries[library].dependsOn);
+        answer = JSON.parse(globalThis.kotlinCompilerHost.call('compile', code, ''));
+        if (answer.error) throw new KotlinWasmError(answer.error);
+      }
 
       const compileMs = Number(answer.milliseconds) || 0;
       if (!answer.ok) {

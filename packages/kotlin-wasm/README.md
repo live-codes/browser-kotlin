@@ -268,8 +268,9 @@ Program runs are tens of milliseconds.
 
 ## Limitations
 
-- **Single file, standard library only.** No other libraries, no Gradle, no
-  multi-file projects. The compiler takes one source string.
+- **Single file, standard library only.** No Gradle and no multi-file projects.
+  The compiler takes one source string. A curated set of libraries is available
+  on the JS target and downloaded lazily; see [Libraries](#libraries-js-target).
 - **Stdin is Wasm-only, line-based and pre-supplied.** There is no interactive
   console: `readln()` reads the next supplied line, and `System.in`/binary
   streams are not available. The JS target has no stdin support yet.
@@ -292,6 +293,77 @@ Program runs are tens of milliseconds.
   Node 22+ is required.
 - **Licensing must be cleared before shipping.** See
   [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+
+## JVM conveniences
+
+A browser has no arguments, no process streams and no console input, but tutorial
+code uses them. On the JS target the compiler supplies them, so this compiles and
+runs unmodified:
+
+```kotlin
+fun main(args: Array<String>) {
+    System.out.println("to stdout")
+    System.err.println("to stderr")
+    println("args = " + args.joinToString(","))
+    println("input = " + readLine())
+    System.exit(0)
+}
+```
+
+| API | How |
+| --- | --- |
+| `main(args)` | The compiler emits `main([])`; the host passes the program's arguments to that call. |
+| `System.out` / `System.err` / `System.exit` | A shim in the default package, so no import is needed. |
+| `readLine()` / `readln()` / `readlnOrNull()` | Same package, feeding from `run(code, input)`. |
+
+They are compiled with the program, so they cost nothing when unused, and a
+program that defines its own is left alone.
+
+## Libraries (JS target)
+
+Kotlin/JS programs expect libraries, which the standard library does not include.
+A program that imports one downloads it the first time it compiles — and a
+program that imports nothing downloads nothing.
+
+```kotlin
+import kotlinx.browser.document
+import kotlinx.coroutines.*
+
+fun main() {
+    document.getElementById("name")?.textContent = "Kotlin"
+    GlobalScope.launch { println("and coroutines") }
+}
+```
+
+The download is transparent: the package compiles, notices the unresolved
+package, fetches that library and its dependencies, and recompiles. The failed
+attempt's diagnostics are never returned, so a user sees only real errors.
+
+| Library | Import root |
+| --- | --- |
+| `kotlin-dom-api-compat` | `kotlin.*` DOM types |
+| `kotlinx-browser` | `kotlinx.browser` |
+| `kotlinx-html` | `kotlinx.html` |
+| `kotlinx-coroutines-core` | `kotlinx.coroutines` |
+| `kotlinx-collections-immutable` | `kotlinx.collections.immutable` |
+| `kotlinx-datetime` | `kotlinx.datetime` |
+| `kotlinx-serialization-core` / `-json` | `kotlinx.serialization` |
+| `kotlin-test` | `kotlin.test` |
+| `atomicfu` | `kotlinx.atomicfu` |
+
+Only the closure a program needs is fetched: `import kotlinx.browser.document`
+downloads two files, not the ten. Versions and hashes are pinned in
+[`assets/js/libraries/kotlin-libraries.json`](assets/js/libraries/kotlin-libraries.json);
+[`scripts/fetch-libraries.mjs`](scripts/fetch-libraries.mjs) regenerates them.
+
+:::caution Serialization
+
+`kotlinx.serialization` klibs are included, but `@Serializable` needs the
+serialization **compiler plugin**, which a GraalVM image cannot load — the
+classes were not kept reachable when it was built. `Json.encodeToString` works for
+built-in types; a `@Serializable` class compiles and then throws at runtime.
+
+:::
 
 ## LiveCodes integration
 

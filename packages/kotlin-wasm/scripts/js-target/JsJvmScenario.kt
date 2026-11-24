@@ -24,6 +24,22 @@ fun main() {
 }
 """
 
+// The JVM conveniences the prelude supplies. Compiled here too, so the tracing
+// agent records whatever the shims reach and a user program using them works in
+// the image rather than only on the JVM.
+private const val JS_PRELUDE_USAGE = """
+fun main(args: Array<String>) {
+    System.out.println("System.out")
+    System.err.println("System.err")
+    System.out.print("no newline")
+    println()
+    println("arg=" + args.joinToString(","))
+    println("line=" + readLine())
+    println("optional=" + readlnOrNull())
+    System.exit(0)
+}
+"""
+
 /** Runs the JS compiler host on the JVM; the build also uses this to record image reachability metadata. */
 fun main(arguments: Array<String>) {
     val archive = Path.of(arguments[0])
@@ -44,6 +60,7 @@ fun main(arguments: Array<String>) {
     request("compile with errors", "compile", JS_BROKEN, "\"severity\":\"ERROR\"")
     request("compile everything", "compile", sample, "\"ok\":true")
     request("compile", "compile", JS_HELLO, "\"ok\":true")
+    request("compile with the prelude shims", "compile", JS_PRELUDE_USAGE, "\"ok\":true")
 
     val jsDir = root.resolve("work-js/js")
     if (Files.isDirectory(jsDir)) {
