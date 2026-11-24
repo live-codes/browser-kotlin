@@ -356,12 +356,14 @@ downloads two files, not the ten. Versions and hashes are pinned in
 [`assets/js/libraries/kotlin-libraries.json`](assets/js/libraries/kotlin-libraries.json);
 [`scripts/fetch-libraries.mjs`](scripts/fetch-libraries.mjs) regenerates them.
 
-:::caution Serialization
+:::note Serialization
 
-`kotlinx.serialization` klibs are included, but `@Serializable` needs the
-serialization **compiler plugin**, which a GraalVM image cannot load — the
-classes were not kept reachable when it was built. `Json.encodeToString` works for
-built-in types; a `@Serializable` class compiles and then throws at runtime.
+`kotlinx.serialization` works, including `@Serializable`. The serialization
+compiler plugin is baked into the image: its classes live in the image's own
+classpath, and each compile is pointed at a directory whose `META-INF/services`
+names them. Plugin classes cannot be defined from a jar at run time in a
+GraalVM image, so the directory deliberately contains no classes — only the
+service descriptors.
 
 :::
 

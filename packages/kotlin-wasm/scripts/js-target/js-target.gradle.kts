@@ -6,8 +6,24 @@ val jsStdlibKlib: Configuration by configurations.creating {
     isTransitive = false
     attributes { attribute(Usage.USAGE_ATTRIBUTE, objects.named("kotlin-runtime")) }
 }
+// The serialization compiler plugin is baked into the image so @Serializable
+// works. Version must match kotlinVersion's generation: the plugin speaks the
+// compiler's own IR, and 2.5.0-Beta2 is the one that links against 2.5.0-dev.
+val jsSerializationPlugin: Configuration by configurations.creating {
+    isTransitive = false
+}
+// The runtime klibs the tracing run compiles against. The image only needs them
+// during tracing: it must see the plugin generate serializers, or the codegen is
+// pruned and @Serializable compiles but throws at run time.
+val jsSerializationKlibs: Configuration by configurations.creating {
+    isTransitive = false
+    attributes { attribute(Usage.USAGE_ATTRIBUTE, objects.named("kotlin-runtime")) }
+}
 dependencies {
     jsStdlibKlib("org.jetbrains.kotlin:kotlin-stdlib-js:$kotlinVersion")
+    jsSerializationPlugin("org.jetbrains.kotlin:kotlin-serialization-compiler-plugin:2.5.0-Beta2")
+    jsSerializationKlibs("org.jetbrains.kotlinx:kotlinx-serialization-core-js:1.13.0")
+    jsSerializationKlibs("org.jetbrains.kotlinx:kotlinx-serialization-json-js:1.13.0")
 }
 
 val jsStdlibArchive = tasks.register("jsStdlibArchive") {
@@ -35,15 +51,46 @@ val jsStdlibArchive = tasks.register("jsStdlibArchive") {
 val jsAgentMetadata = layout.buildDirectory.dir("agentJsMetadata")
 val jsOutput = layout.buildDirectory.dir("jsOutput")
 
+// Packs each serialization klib into the host's archive format, so the tracing
+// run loads them the same way a user program would.
+val jsSerializationArchives = tasks.register("jsSerializationArchives") {
+    description = "Packs the serialization klibs for the tracing run"
+    val klibs = jsSerializationKlibs
+    val output = layout.buildDirectory.dir("serialization")
+    inputs.files(klibs)
+    outputs.dir(output)
+    doLast {
+        val directory = output.get().asFile.apply { mkdirs() }
+        for (klib in klibs.files) {
+            // kotlinx-serialization-json-js-1.13.0.klib -> kotlinx-serialization-json
+            val name = klib.name.substringBeforeLast('-').removeSuffix("-js")
+            ZipFile(klib).use { zip ->
+                val entries = zip.entries().asSequence().filter { !it.isDirectory }.sortedBy { it.name }.toList()
+                DataOutputStream(File(directory, "$name.bin").outputStream().buffered()).use { out ->
+                    out.writeInt(entries.size)
+                    for (entry in entries) {
+                        val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                        out.writeUTF(entry.name)
+                        out.writeInt(bytes.size)
+                        out.write(bytes)
+                    }
+                }
+            }
+        }
+    }
+}
+
 val jsJvmScenario = tasks.register<JavaExec>("jsJvmScenario") {
     description = "Compiles JS on the JVM and records what the JS image must keep reachable"
     group = "verification"
     enabled = graalvmHome != null
     executable(graalvmTool("java"))
-    classpath = imageClasspath
+    classpath = imageClasspath + jsSerializationPlugin
     mainClass = "editor.compilerhost.JsJvmScenarioKt"
     val archive = jsStdlibArchive.map { it.outputs.files.singleFile }
+    val serialization = jsSerializationArchives.map { it.outputs.files }
     inputs.file(archive)
+    inputs.files(serialization)
     inputs.file(layout.projectDirectory.file("src/scenario/shapes.kt"))
     outputs.dir(jsAgentMetadata)
     outputs.dir(jsOutput)
@@ -52,6 +99,8 @@ val jsJvmScenario = tasks.register<JavaExec>("jsJvmScenario") {
             archive.get().path,
             layout.projectDirectory.file("src/scenario/shapes.kt").asFile.path,
             jsOutput.get().asFile.path,
+            // The .bin files, not the directory that holds them.
+            serialization.get().asFileTree.files.joinToString(",") { it.path },
         )
     }
     jvmArgumentProviders.add {
@@ -70,7 +119,7 @@ val jsWebImage = tasks.register<Exec>("jsWebImage") {
     description = "Compiles the JS-target compiler host to WebAssembly with GraalVM Web Image"
     group = "build"
     enabled = graalvmHome != null
-    val classpath = imageClasspath + files(jsAgentMetadata).builtBy(jsJvmScenario)
+    val classpath = imageClasspath + jsSerializationPlugin + files(jsAgentMetadata).builtBy(jsJvmScenario)
     inputs.files(classpath)
     inputs.property("debugOptions", debugOptions.toList())
     inputs.property("jsHeap", jsHeap)

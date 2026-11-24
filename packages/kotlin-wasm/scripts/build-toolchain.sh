@@ -99,9 +99,20 @@ if [ "$TARGET" = js ]; then
   cp "$TOOLCHAIN_SRC/JsCompilerHost.kt" compiler-host/src/main/kotlin/editor/compilerhost/
   cp "$TOOLCHAIN_SRC/JsJvmScenario.kt" compiler-host/src/main/kotlin/editor/compilerhost/
   cp "$TOOLCHAIN_SRC/WebMainJs.java" compiler-host/src/main/java/editor/compilerhost/web/
-  if ! grep -q 'jsWebImage' compiler-host/build.gradle.kts; then
-    cat "$TOOLCHAIN_SRC/js-target.gradle.kts" >> compiler-host/build.gradle.kts
-  fi
+  # Replace the JS block if present rather than appending a second copy: a stale
+  # block would redeclare jsStdlibKlib and fail to configure. The block is marked
+  # by a comment so a re-run can find its start.
+  python3 - compiler-host/build.gradle.kts "$TOOLCHAIN_SRC/js-target.gradle.kts" <<'PY'
+import sys
+target, source = sys.argv[1], sys.argv[2]
+marker = "// Appended to compiler-host/build.gradle.kts"
+head = open(target).read().split(marker)[0].rstrip() + "\n\n"
+open(target, "w").write(
+    head
+    + "// Appended to compiler-host/build.gradle.kts by scripts/build-toolchain.sh when TARGET=js.\n"
+    + open(source).read()
+)
+PY
 fi
 
 sed -i.bak "s/^kotlin = \".*\"/kotlin = \"${KOTLIN}\"/" gradle/libs.versions.toml

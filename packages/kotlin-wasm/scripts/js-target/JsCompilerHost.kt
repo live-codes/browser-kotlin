@@ -16,6 +16,7 @@ import java.util.Base64
 import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.ExperimentalPathApi
+import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
 import kotlin.io.path.readBytes
@@ -77,6 +78,25 @@ fun readln(): String = readlnOrNull() ?: throw NoSuchElementException("EOF")
 
 /** The user's program, whose diagnostics carry this name. */
 private const val JS_MAIN_FILE = JS_FILE_NAME
+
+/**
+ * The serialization plugin, registered for every compile.
+ *
+ * A GraalVM image cannot load classes from a jar at run time, so `-Xcompiler-plugin`
+ * cannot point at the real plugin. It does not have to: the plugin classes are
+ * baked into the image's own classpath, and the loader only needs a directory
+ * whose `META-INF/services` names them. It then reads the registrar from its
+ * service file and resolves the class through the image.
+ *
+ * The directory holds no classes on purpose — a `META-INF/services` entry plus an
+ * empty class body is what makes this work in a closed world.
+ */
+private val SERIALIZATION_PLUGIN_SERVICES: Map<String, String> = mapOf(
+    "META-INF/services/org.jetbrains.kotlin.compiler.plugin.CommandLineProcessor" to
+        "org.jetbrains.kotlinx.serialization.compiler.extensions.SerializationPluginOptions",
+    "META-INF/services/org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar" to
+        "org.jetbrains.kotlinx.serialization.compiler.extensions.SerializationComponentRegistrar",
+)
 
 private class JsDiagnostic(val severity: String, val message: String, val from: Int, val to: Int)
 
@@ -153,11 +173,31 @@ class JsCompilerHost(private val root: Path) {
             "-kotlin-home", home.toString(),
             "-libraries", (listOf(stdlib) + extraLibraries).joinToString(File.pathSeparator),
             "-ir-output-name", "main",
+            "-Xcompiler-plugin=${pluginDirectory()}",
             // The prelude's @JsFun host hooks are the only ever use of this
             // experimental interop; opting in keeps a warning out of every
             // program's diagnostics, where it would look like the user's fault.
             "-opt-in=kotlin.js.ExperimentalWasmJsInterop",
         )
+
+    /**
+     * Writes the plugin's service descriptors and returns the directory.
+     *
+     * Written on first use rather than at construction, so the files exist before
+     * the first compile and never go stale. `@Serializable` needs the plugin
+     * whether or not the program imports the serialization libraries, so this is
+     * not gated on them.
+     */
+    private fun pluginDirectory(): Path {
+        val directory = root.resolve("plugin")
+        if (directory.resolve("META-INF").isDirectory()) return directory
+        for ((name, content) in SERIALIZATION_PLUGIN_SERVICES) {
+            val file = directory.resolve(name)
+            file.parent.createDirectories()
+            file.writeText(content + "\n")
+        }
+        return directory
+    }
 
     private fun libraryArguments(klib: Path, sourceFile: Path, preludeFiles: List<Path>) =
         commonArguments +
@@ -259,6 +299,10 @@ class JsCompilerHost(private val root: Path) {
             override fun report(severity: CompilerMessageSeverity, message: String, location: CompilerMessageSourceLocation?) {
                 if (severity.isError) errors = true
                 if (!severity.isError && !severity.isWarning) return
+                // Registering the plugin is experimental and the compiler says so
+                // once per argument parse. It is our choice, not the program's,
+                // and would otherwise show on every compile.
+                if (message.contains("Argument -Xcompiler-plugin is experimental")) return
                 val inPrelude = location?.path?.let { path -> preludeNames.any { path.endsWith(it) } } ?: false
                 if (inPrelude) {
                     diagnostics += JsDiagnostic(if (severity.isError) "ERROR" else "WARNING", message, 0, 0)

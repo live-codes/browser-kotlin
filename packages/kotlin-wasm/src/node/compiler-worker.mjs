@@ -70,6 +70,13 @@ function compile(source) {
   return answer;
 }
 
+/** Unpacks one optional library under its own name, as the browser engines do. */
+function addLibraries(name, archiveBase64) {
+  const answer = JSON.parse(host.call('addLibraries', archiveBase64, name));
+  if (answer.error) throw new Error(answer.error);
+  return answer;
+}
+
 parentPort.on('message', async (message) => {
   try {
     await ready;
@@ -89,6 +96,12 @@ parentPort.on('message', async (message) => {
         id: message.id,
         result: { answer, compileMs: answer.milliseconds, runMs: null }
       });
+      return;
+    }
+
+    if (message.type === 'addLibraries') {
+      const answer = addLibraries(message.name, message.archive);
+      post({ type: 'library', id: message.id, result: { answer } });
       return;
     }
 

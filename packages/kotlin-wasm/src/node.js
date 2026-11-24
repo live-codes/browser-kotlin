@@ -3,9 +3,11 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 
 import { COMPILER_VERSION } from './language.js';
 import { KotlinUnsupportedError, KotlinWasmError } from './errors.js';
+import { compileWithLibraries } from './libraries.js';
 import { buildResult, compileFailureResult, formatDiagnostics } from './output.js';
 import { prepareSource, splitLines } from './prelude.js';
 
@@ -333,6 +335,34 @@ function runOnRecord(record, { source, inputLines, fileName, timeoutMs, compileT
   });
 }
 
+/**
+ * Adds one optional library to the compiler, by name.
+ *
+ * The archive is read from the assets directory and passed as base64, the same
+ * operation the browser engines use, so Node and the browser agree on what a
+ * program can import.
+ */
+function addLibraryOnRecord(record, name, archive) {
+  return withLock(record, () => {
+    if (record.dead) throw record.failure || new KotlinWasmError('The Kotlin worker is not running.');
+    return new Promise((resolve, reject) => {
+      const id = record.nextId++;
+      record.pending.set(id, {
+        onDone: (data) => {
+          if (data.type === 'library') {
+            resolve(data.result);
+          } else if (data.type === 'error') {
+            reject(new KotlinWasmError(data.message || 'The Kotlin library failed to load.'));
+          } else {
+            reject(new KotlinWasmError('The Kotlin worker sent an unexpected message.'));
+          }
+        }
+      });
+      record.worker.postMessage({ type: 'addLibraries', id, name, archive });
+    });
+  });
+}
+
 function compileOnRecord(record, { source, fileName, compileTimeoutMs }) {
   return withLock(record, () => {
     if (record.dead) throw record.failure || new KotlinWasmError('The Kotlin worker is not running.');
@@ -425,6 +455,31 @@ export async function createNodeEngine(options = {}) {
     return record;
   };
 
+  // Optional libraries are read from the assets directory on demand, so a
+  // program that imports none never touches them.
+  const loadedLibraries = new Set();
+  const libraryIndex =
+    target === 'js'
+      ? JSON.parse(await readFile(join(assets.dir, 'libraries', 'kotlin-libraries.json'), 'utf8'))
+      : { libraries: {} };
+  const libraryOptions = () => ({
+    libraries: libraryIndex.libraries,
+    loaded: loadedLibraries,
+    // The archives are shipped gzipped; the host wants the inflated bytes, as in
+    // the browser, where the decompression happens on the page.
+    fetchArchive: async (entry) => gunzipSync(await readFile(join(assets.dir, 'libraries', entry.file))),
+    install: async (name, archive) => {
+      await addLibraryOnRecord(record, name, archive.toString('base64'));
+    },
+  });
+
+  /** Compiles with lazy library loading, sharing one implementation with the browser. */
+  const compileWithRetries = (current, request) =>
+    compileWithLibraries(() => compileOnRecord(current, request), {
+      ...libraryOptions(),
+      source: request.source,
+    });
+
   let disposed = false;
   return {
     capabilities: {
@@ -442,7 +497,7 @@ export async function createNodeEngine(options = {}) {
       const compileTimeout =
         Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS;
       const current = await getRecord();
-      const outcome = await compileOnRecord(current, {
+      const outcome = await compileWithRetries(current, {
         source: code,
         fileName,
         compileTimeoutMs: compileTimeout
@@ -483,6 +538,17 @@ export async function createNodeEngine(options = {}) {
         Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS;
       const prepared = target === 'js' ? { source: code, mapOffset: 0 } : prepareSource(code, input);
       const current = await getRecord();
+      // Load any library the program needs before the run, because the run
+      // request compiles and executes in one round trip and cannot fetch one
+      // itself. A program that imports nothing pays a single compile for this.
+      const probe = await compileWithRetries(current, {
+        source: prepared.source,
+        fileName,
+        compileTimeoutMs: compileTimeout
+      });
+      if (probe.answer && !probe.answer.ok) {
+        return compileFailureResult(probe.answer, code, fileName, prepared.mapOffset);
+      }
       const outcome = await runOnRecord(current, {
         source: prepared.source,
         inputLines: splitLines(input),

@@ -40,11 +40,27 @@ fun main(args: Array<String>) {
 }
 """
 
+// @Serializable, so the tracing run makes the plugin actually generate a
+// serializer. Without this the image keeps the plugin but prunes its codegen,
+// and the program compiles then throws "Serializer not found" at run time.
+private const val JS_SERIALIZABLE = """
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
+@Serializable
+data class Point(val x: Int, val y: Int)
+
+fun main() {
+    println(Json.encodeToString(Point(2, 3)))
+}
+"""
+
 /** Runs the JS compiler host on the JVM; the build also uses this to record image reachability metadata. */
 fun main(arguments: Array<String>) {
     val archive = Path.of(arguments[0])
     val sample = Path.of(arguments[1]).readText()
     val output = Path.of(arguments[2]).createDirectories()
+    val serializationArchives = arguments.getOrNull(3)?.split(",")?.filter { it.isNotBlank() }.orEmpty()
     val root = Files.createTempDirectory("compiler-host-js")
     val host = JsCompilerHost(root)
     val failures = mutableListOf<String>()
@@ -61,6 +77,20 @@ fun main(arguments: Array<String>) {
     request("compile everything", "compile", sample, "\"ok\":true")
     request("compile", "compile", JS_HELLO, "\"ok\":true")
     request("compile with the prelude shims", "compile", JS_PRELUDE_USAGE, "\"ok\":true")
+
+    // The serialization libraries are loaded by name, exactly as the package does
+    // when a program imports them. The name is the second argument: each library
+    // needs its own root under lib/extra, or one overwrites the next.
+    for (path in serializationArchives) {
+        val name = Path.of(path).fileName.toString().removeSuffix(".bin")
+        val archiveBytes = Base64.getEncoder().encodeToString(Path.of(path).readBytes())
+        val answer = host.handle("addLibraries", archiveBytes, name)
+        println("add $name: ${answer.take(200)}")
+        if ("\"files\"" !in answer) failures += "add $name: ${answer.take(2000)}"
+    }
+    if (serializationArchives.isNotEmpty()) {
+        request("compile with @Serializable", "compile", JS_SERIALIZABLE, "\"ok\":true")
+    }
 
     val jsDir = root.resolve("work-js/js")
     if (Files.isDirectory(jsDir)) {

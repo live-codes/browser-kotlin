@@ -1,5 +1,6 @@
 import { COMPILER_VERSION } from './language.js';
 import { KotlinUnsupportedError, KotlinWasmError } from './errors.js';
+import { compileWithLibraries } from './libraries.js';
 import { buildResult, compileFailureResult, formatDiagnostics } from './output.js';
 import { JS_STDIN_HOOK, prepareSource, splitLines } from './prelude.js';
 
@@ -7,6 +8,35 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_COMPILE_TIMEOUT_MS = 180000;
 
 const records = new Map();
+
+/**
+ * Fetches bytes from the page. Libraries are fetched here rather than in the
+ * worker because the page is what knows the asset URL and already has the
+ * fetch/decompress path.
+ */
+async function fetchBytes(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new KotlinWasmError(`Failed to load ${url}: ${response.status} ${response.statusText}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+/** Gunzips a complete archive, accepting one already served decompressed. */
+async function inflateArchive(bytes) {
+  if (!(bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b)) return bytes;
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/** Base64 without blowing the call stack on a multi-megabyte archive. */
+function toBase64(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
 
 function assertBrowser() {
   if (typeof Worker !== 'function' || typeof WebAssembly !== 'object') {
@@ -197,6 +227,26 @@ async function createRecord(baseUrl, onProgress) {
     });
 
   record.request = request;
+
+  // Library state is per worker: a library added to this compiler host stays
+  // added, so remember it rather than re-fetching on every compile.
+  record.loadedLibraries = new Set();
+  record.loadLibraryIndex = async () => {
+    record.libraryIndex ??= JSON.parse(
+      new TextDecoder().decode(
+        await fetchBytes(new URL('libraries/kotlin-libraries.json', baseUrl))
+      )
+    );
+    return record.libraryIndex;
+  };
+  record.fetchLibraryArchive = async (entry) => {
+    const bytes = await fetchBytes(new URL(`libraries/${entry.file}`, baseUrl));
+    return inflateArchive(bytes);
+  };
+  record.installLibrary = async (name, archive) => {
+    const answer = await request('addLibraries', toBase64(archive), name);
+    if (answer?.error) throw new KotlinWasmError(answer.error);
+  };
   record.warm = () => {
     record.warmPromise ??= request('compile', 'fun main() {}').then((answer) => {
       if (answer?.error) throw new KotlinWasmError(answer.error);
@@ -257,15 +307,37 @@ function decodeAnswerFiles(files, target) {
   });
 }
 
-async function compileInWorker(record, { source, fileName, target, compileTimeoutMs }) {
-  const answer = await record.request(
-    'compile',
-    source,
-    '',
-    Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS
+async function compileAnswer(record, { source, target, compileTimeoutMs }) {
+  const timeout =
+    Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS;
+  // Optional libraries are fetched only when a compile needs one, so a program
+  // that imports nothing pays nothing. The host keeps what is added for the
+  // lifetime of this worker, which is why the loaded set lives on the record.
+  await record.loadLibraryIndex();
+  const answer = await compileWithLibraries(
+    async () => {
+      const result = await record.request('compile', source, '', timeout);
+      if (result?.error) throw new KotlinWasmError(result.error);
+      return result;
+    },
+    {
+      libraries: record.libraryIndex.libraries,
+      loaded: record.loadedLibraries,
+      fetchArchive: record.fetchLibraryArchive,
+      install: record.installLibrary,
+      source,
+    },
   );
-  if (answer?.error) throw new KotlinWasmError(answer.error);
-  const compileMs = Number(answer?.milliseconds) || 0;
+  return {
+    answer,
+    compileMs: Number(answer?.milliseconds) || 0,
+    // The runner needs the compiler's own base64 entries, not the decoded text.
+    files: answer?.files || [],
+  };
+}
+
+async function compileInWorker(record, { source, fileName, target, compileTimeoutMs }) {
+  const { answer, compileMs } = await compileAnswer(record, { source, target, compileTimeoutMs });
   if (!answer?.ok) {
     return {
       ok: false,
@@ -289,19 +361,18 @@ async function compileInWorker(record, { source, fileName, target, compileTimeou
 }
 
 async function runInWorker(record, { source, timeoutMs, input, target }) {
-  const answer = await record.request('compile', source, '');
-  if (answer?.error) throw new KotlinWasmError(answer.error);
-
-  const compileMs = Number(answer?.milliseconds) || 0;
-  if (!answer?.ok) {
+  // Compile through the same path as compile(), so a program that needs a
+  // library gets it here too rather than failing with an unresolved reference.
+  const { answer, compileMs, files } = await compileAnswer(record, { source, target });
+  if (!answer.ok) {
     return { answer, compileMs, chunks: [], runMs: null };
   }
 
   const chunks = [];
   const outcome = target === 'js'
-    ? await runCompiledJs(answer.files, (chunk) => chunks.push(chunk), timeoutMs)
+    ? await runCompiledJs(files, (chunk) => chunks.push(chunk), timeoutMs)
     : await runCompiledProgram(
-        answer.files,
+        files,
         (chunk) => chunks.push(chunk),
         timeoutMs,
         input
@@ -477,7 +548,12 @@ export async function createBrowserEngine(options = {}) {
     async run({ code, input, fileName, timeoutMs }) {
       if (disposed) throw new Error('This compiler has been disposed.');
       const runTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS;
+      // The Wasm target prepends a stdin prelude, shifting every offset by a
+      // fixed amount; diagnostics subtract it. The JS target prepends nothing.
       const prepared = target === 'js' ? { source: code, mapOffset: 0 } : prepareSource(code, input);
+      const shift = typeof prepared.mapOffset === 'function'
+        ? prepared.mapOffset
+        : (offset) => offset - Number(prepared.mapOffset || 0);
       const outcome = await runInWorker(record, {
         source: prepared.source,
         timeoutMs: runTimeout,
@@ -485,7 +561,7 @@ export async function createBrowserEngine(options = {}) {
         target
       });
       if (outcome.answer && !outcome.answer.ok) {
-        return compileFailureResult(outcome.answer, code, fileName, prepared.mapOffset);
+        return compileFailureResult(outcome.answer, code, fileName, shift);
       }
       return buildResult({
         chunks: outcome.chunks || [],
