@@ -839,8 +839,14 @@ without a Wasm import object.
 - **LiveCodes nested workers.** Not yet tested inside the LiveCodes result
   sandbox/CSP; this is the first integration experiment. The JS target adds no
   program wasm, but the compiler worker is still a nested Blob worker.
-- **JS stdin.** Not implemented; `capabilities.stdin` is false for the JS target.
-  The emitted JS program itself is ordinary JavaScript.
+- **JS stdin.** The JS target reads the lines passed to `run()`, through prelude
+  shims; there is still no interactive console.
+- **Serialization plugin wiring.** The plugin classes are baked into the image and
+  reached through a directory whose `META-INF/services` names them (see the
+  serialization section of `TOOLCHAIN.md`). The pin is `2.5.0-Beta2`: it is the
+  only published plugin that links against the `2.5.0-dev` compiler, and `-RC`
+  throws `IrGenerationExtensionException`. Upgrading the compiler means finding
+  the plugin build that matches it, which may not exist.
 - **JS compiler image.** It is still a ~32.7 MB gz GraalVM image and needs
   WasmGC/exception handling; only the emitted program avoids WasmGC.
 - **Node versions.** Tested on Node 24.11, where WebAssembly exceptions are on by

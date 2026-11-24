@@ -188,12 +188,48 @@ node scripts/toolchain.mjs vendor \
   --compiler-version 2.5.0-dev-9169
 ```
 
+## The serialization compiler plugin
+
+`@Serializable` needs the serialization compiler plugin, and a GraalVM image
+cannot load classes from a jar at run time. The plugin is baked into the image
+instead, and reached without ever loading a class from disk:
+
+- The plugin jar is a dependency of the image build (`jsSerializationPlugin` in
+  `scripts/js-target/js-target.gradle.kts`), so its classes are in the classpath
+  GraalVM analyses and keeps.
+- Each compile passes `-Xcompiler-plugin=<dir>`, where `<dir>` holds **only**
+  `META-INF/services/…` descriptors — no `.class` files at all. The loader reads
+  the descriptor, and class resolution delegates to the image's own classloader,
+  which already has the class. The host writes that directory itself from
+  `SERIALIZATION_PLUGIN_SERVICES`.
+- `jsJvmScenario` compiles a `@Serializable` program during tracing. Without it
+  the plugin is present but its codegen is pruned, and programs compile and then
+  throw `Serializer for class … is not found` at run time. That is the exact
+  failure to watch for after an upgrade.
+
+Two approaches that do **not** work, so they are not worth retrying:
+
+- Pointing `-Xcompiler-plugin` at the real plugin jar. A jar on disk needs class
+  definition, which the image cannot do.
+- Putting the plugin merely on the classpath and passing no flag. It compiles
+  without error, but the plugin never runs — the silent failure described above.
+
+`2.5.0-Beta2` is the only published plugin that links against `2.5.0-dev-9169`;
+`2.5.0-RC` throws `IrGenerationExtensionException`. When upgrading the compiler,
+find the plugin build from the same series first; if there is none, serialization
+must be dropped or the compiler pin changed.
+
 ## Upgrading Kotlin
 
 1. Pick a Kotlin version that the upstream host can compile against. The
    current build uses `2.5.0-dev-9169` from
    `https://packages.jetbrains.team/maven/p/kt/bootstrap`. A stable release may
    need a different repository or upstream changes.
+   **Also find the matching serialization plugin** and change
+   `jsSerializationPlugin` in `scripts/js-target/js-target.gradle.kts`. Without a
+   compatible plugin, `@Serializable` compiles but throws at run time; verify with
+   `test/serialization.test.js`, which runs a serializer rather than only
+   compiling one.
 2. Build with the version override:
 
    ```sh
