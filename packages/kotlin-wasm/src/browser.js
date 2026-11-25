@@ -232,15 +232,22 @@ async function createRecord(baseUrl, onProgress) {
   // added, so remember it rather than re-fetching on every compile.
   record.loadedLibraries = new Set();
   record.loadLibraryIndex = async () => {
+    // Optional libraries belong to the JS image only: the wasm host has no
+    // addLibraries operation and ships no `libraries/` directory. Fetching the
+    // index for it would 404 and fail every compile.
+    if (record.target !== 'js') {
+      record.libraryIndex = { libraries: {} };
+      return record.libraryIndex;
+    }
     record.libraryIndex ??= JSON.parse(
       new TextDecoder().decode(
-        await fetchBytes(new URL('libraries/kotlin-libraries.json', baseUrl))
-      )
+        await fetchBytes(new URL('libraries/kotlin-libraries.json', record.baseUrl)),
+      ),
     );
     return record.libraryIndex;
   };
   record.fetchLibraryArchive = async (entry) => {
-    const bytes = await fetchBytes(new URL(`libraries/${entry.file}`, baseUrl));
+    const bytes = await fetchBytes(new URL(`libraries/${entry.file}`, record.baseUrl));
     return inflateArchive(bytes);
   };
   record.installLibrary = async (name, archive) => {

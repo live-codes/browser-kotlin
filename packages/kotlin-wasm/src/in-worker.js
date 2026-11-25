@@ -83,6 +83,19 @@ export async function createInWorkerCompiler(options = {}) {
   // `target: 'js'` loads the Kotlin/JS image from `assets/js/`.
   const target = options.target === 'js' ? 'js' : 'wasm';
 
+  // One worker can hold one GraalVM image: each installs `kotlinCompilerHost` on
+  // the global, and the second cannot replace the first. The wait loop below
+  // therefore has to distinguish "the image I just loaded" from "an image a
+  // previous call left here", or it would adopt the old host and compile the
+  // other target's stdlib with it.
+  const previousHost = globalThis.__kotlinCompilerHostTarget;
+  if (previousHost !== undefined && previousHost !== target) {
+    throw new KotlinUnsupportedError(
+      `This worker already hosts the Kotlin ${previousHost} compiler, and a GraalVM image ` +
+        `cannot be replaced in place. Create the ${target} compiler in its own worker.`
+    );
+  }
+
   const manifest = JSON.parse(
     new TextDecoder().decode(await fetchBytes(new URL('kotlin-assets.json', baseUrl)))
   );
@@ -111,6 +124,11 @@ export async function createInWorkerCompiler(options = {}) {
   );
   const patched = rewriteImage(stripWorkerGlue(imageText), baseUrl, { wasmUrl });
 
+  // A host left by an earlier call for this same target must not be mistaken for
+  // the image just loaded: its `init` already ran, and re-running it is the point
+  // of the loop below. Drop it so the loop waits for the fresh one.
+  delete globalThis.kotlinCompilerHost;
+
   globalThis.importScripts(
     URL.createObjectURL(new Blob([patched], { type: 'text/javascript' }))
   );
@@ -125,6 +143,9 @@ export async function createInWorkerCompiler(options = {}) {
 
   const init = JSON.parse(globalThis.kotlinCompilerHost.call('init', toBase64(stdlib), ''));
   if (init.error) throw new KotlinWasmError(init.error);
+  // Remember which image owns this worker's global, so a later call for the other
+  // target fails with an explanation instead of compiling against the wrong stdlib.
+  globalThis.__kotlinCompilerHostTarget = target;
   if (onProgress) onProgress(1);
 
   // Optional libraries are downloaded on demand, so a program that does not use
