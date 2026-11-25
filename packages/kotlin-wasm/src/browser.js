@@ -131,13 +131,16 @@ export function rewriteImage(text, baseUrl, urls = {}) {
     );
 }
 
-async function createRecord(baseUrl, onProgress) {
+async function createRecord(baseUrl, onProgress, target = 'wasm') {
   assertBrowser();
   const { wrapperUrl, imageUrl } = await loadWorkerScripts(baseUrl);
 
   const record = {
     key: baseUrl,
     baseUrl,
+    // Which image this worker loaded. Library support follows it: only the JS
+    // image ships `libraries/`, and only its host implements `addLibraries`.
+    target,
     worker: null,
     blobUrls: [wrapperUrl, imageUrl],
     nextId: 1,
@@ -271,10 +274,10 @@ async function createRecord(baseUrl, onProgress) {
   return record;
 }
 
-async function acquireRecord(baseUrl, onProgress) {
+async function acquireRecord(baseUrl, onProgress, target = 'wasm') {
   let record = records.get(baseUrl);
   if (!record) {
-    record = await createRecord(baseUrl, onProgress);
+    record = await createRecord(baseUrl, onProgress, target);
     records.set(baseUrl, record);
   } else if (onProgress) {
     record.progressSinks.add(onProgress);
@@ -514,7 +517,7 @@ export async function createBrowserEngine(options = {}) {
   assertBrowser();
   const target = options.target === 'js' ? 'js' : 'wasm';
   const baseUrl = resolveBaseUrl(options);
-  const record = await acquireRecord(baseUrl, options.onProgress);
+  const record = await acquireRecord(baseUrl, options.onProgress, target);
 
   // A host that already runs in a worker can skip the throwaway compile.
   if (options.warm !== false) {
