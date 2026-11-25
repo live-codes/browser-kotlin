@@ -133,6 +133,9 @@ export async function createInWorkerCompiler(options = {}) {
   const loadedLibraries = new Set();
 
   async function ensureLibraryIndex() {
+    // Only the JS image ships optional libraries. Fetching the index for the Wasm
+    // target would 404, and the wasm host has no `addLibraries` operation.
+    if (target !== 'js') return { libraries: {} };
     libraryIndex ??= JSON.parse(
       new TextDecoder().decode(await fetchBytes(new URL('kotlin-libraries.json', baseUrl + 'libraries/')))
     );
@@ -140,7 +143,7 @@ export async function createInWorkerCompiler(options = {}) {
   }
 
   const libraryOptions = (source) => ({
-    libraries: libraryIndex.libraries,
+    libraries: libraryIndex?.libraries ?? {},
     loaded: loadedLibraries,
     source,
     fetchArchive: async (entry) => inflate(await fetchBytes(new URL(entry.file, baseUrl + 'libraries/'))),
