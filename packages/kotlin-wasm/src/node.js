@@ -497,8 +497,11 @@ export async function createNodeEngine(options = {}) {
       const compileTimeout =
         Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS;
       const current = await getRecord();
+      // The shims are part of the program, so `compile()` emits what `run()` would
+      // execute; a host that only compiles still gets the JVM conveniences.
+      const prepared = prepareSource(code, '', target);
       const outcome = await compileWithRetries(current, {
-        source: code,
+        source: prepared.source,
         fileName,
         compileTimeoutMs: compileTimeout
       });
@@ -536,7 +539,9 @@ export async function createNodeEngine(options = {}) {
       const runTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS;
       const compileTimeout =
         Number(compileTimeoutMs) > 0 ? Number(compileTimeoutMs) : DEFAULT_COMPILE_TIMEOUT_MS;
-      const prepared = target === 'js' ? { source: code, mapOffset: 0 } : prepareSource(code, input);
+      // Both targets get the JVM compatibility shims, appended so no offsets move;
+      // wasm additionally gets the stdin prelude when input is supplied.
+      const prepared = prepareSource(code, input, target);
       const current = await getRecord();
       // Load any library the program needs before the run, because the run
       // request compiles and executes in one round trip and cannot fetch one

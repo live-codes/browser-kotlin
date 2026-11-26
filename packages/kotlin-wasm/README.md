@@ -262,9 +262,11 @@ Verified in Node and Chromium; `npm test` compiles and runs it.
 - **A program timeout that leaves the compiler warm.** The program runs in its
   own worker; terminating it does not reload the target's compiler image.
 
-Measured on this machine: browser compiles are ~1–3 s (first ~4 s including the
+Measured on this machine: browser compiles are ~2–4 s (first ~5 s including the
 load), Node compiles are ~7–17 s (the first includes the image's JIT warm-up).
-Program runs are tens of milliseconds.
+Program runs are tens of milliseconds. About a second of each compile is the JVM
+compatibility shims from [`src/shim.js`](#jvm-standard-library-srcshimjs), which are
+compiled with every program.
 
 ## Limitations
 
@@ -297,8 +299,7 @@ Program runs are tens of milliseconds.
 ## JVM conveniences
 
 A browser has no arguments, no process streams and no console input, but tutorial
-code uses them. On the JS target the compiler supplies them, so this compiles and
-runs unmodified:
+code uses them. The compiler supplies them, so this compiles and runs unmodified:
 
 ```kotlin
 fun main(args: Array<String>) {
@@ -316,8 +317,50 @@ fun main(args: Array<String>) {
 | `System.out` / `System.err` / `System.exit` | A shim in the default package, so no import is needed. |
 | `readLine()` / `readln()` / `readlnOrNull()` | Same package, feeding from `run(code, input)`. |
 
-They are compiled with the program, so they cost nothing when unused, and a
-program that defines its own is left alone.
+### JVM standard library (`src/shim.js`)
+
+Neither target ships the JVM standard library, so the pieces tutorial code reaches
+for are supplied as Kotlin source appended to every program — on **both** targets:
+
+| Area | Supplied |
+| --- | --- |
+| `System` | `currentTimeMillis`, `nanoTime`, `lineSeparator`, `getProperty`, `getenv`, `gc`, `arraycopy` |
+| Formatting | `"…".format(…)`, `printf` — `%d %f %e %x %X %o %c %b %s %n %%`, with width, `-`, `0` and `,` flags |
+| `Math` | `PI`, `E`, `abs`, `max`, `min`, `sqrt`, `cbrt`, `pow`, `floor`, `ceil`, `round`, `random`, the trigonometric and logarithmic functions, `hypot`, `signum`, `toRadians`, `toDegrees` |
+| `Integer` | `parseInt`, `parseLong`, `toString`, `toHexString`, `toBinaryString`, `toOctalString`, `compare`, `signum`, `sum`, `MAX_VALUE`, `MIN_VALUE` |
+| `Character` | `isDigit`, `isLetter`, `isLetterOrDigit`, `isWhitespace`, `isUpperCase`, `isLowerCase`, `toUpperCase`, `toLowerCase`, `getNumericValue` |
+| `Arrays` | `toString`, `sort`, `equals`, `copyOf`, `asList` |
+| `Collections` | `sort`, `reverse`, `shuffle`, `max`, `min`, `swap` |
+| Threads | `Thread`, `thread {}`, `synchronized`, `@Volatile`, `@Synchronized` |
+| Other | `Throwable.printStackTrace()` |
+
+```kotlin
+fun main() {
+    println("%.2f".format(Math.sqrt(2.0)))       // 1.41
+    println("%,d".format(1234567))               // 1,234,567
+    println(Integer.parseInt("42") + 1)          // 43
+    println(Arrays.toString(intArrayOf(1, 2)))   // [1, 2]
+}
+```
+
+These are approximations, not a replacement for the JVM:
+
+- `System.getProperty` and `System.getenv` return `null`; there is no environment.
+- `synchronized`, `@Volatile` and `@Synchronized` are no-ops — there is one thread, so
+  there is nothing to guard. `Thread.sleep` does not sleep, and `start()` runs the body
+  immediately rather than in parallel.
+- `%f` uses JavaScript's `toFixed`, so a value with no exact binary representation
+  rounds where the JVM might not: `%.3f` of `1.0005` gives `1.000`, not `1.001`.
+- `java.*` packages are unavailable: `import java.util.ArrayList` cannot compile.
+
+`System` differs per target because the targets do. On the JS target the image already
+declares `object System`, so the members are added as extensions on it. Kotlin/Wasm has
+no `System` at all, so the object is declared whole, including `out`/`err`, which write
+through a host hook. Everything else is identical: the numeric work goes through
+`@JsFun`, which works on both.
+
+They are appended after the program, so diagnostics keep the user's line numbers, and a
+program that defines its own version is left alone.
 
 ## Libraries (JS target)
 

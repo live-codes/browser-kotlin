@@ -1,6 +1,6 @@
 {
   "name": "@live-codes/kotlin-wasm",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Run Kotlin with one API, on the real K2 compiler compiled to WebAssembly, with Wasm and JS targets",
   "type": "module",
   "license": "Apache-2.0",

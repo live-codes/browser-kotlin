@@ -1,8 +1,10 @@
 // Kotlin/Wasm's stdlib has no console input: `readLine` is unresolved and
-// `readlnOrNull` returns null. When input is supplied we prepend a small
-// prelude that shadows those functions and reads lines from a host hook. It is
+// `readlnOrNull` returns null. When input is supplied we append a small prelude
+// that shadows those functions and reads lines from a host hook. It is
 // line-based, pre-supplied input — not an interactive console — but it gives
 // programs the API they expect.
+import { buildCompatShims } from './shim.js';
+
 export const JS_STDIN_HOOK = '__liveCodesKotlinWasmReadLine';
 
 const PRELUDE_HEADER = `@JsFun("() => globalThis.${JS_STDIN_HOOK}()")
@@ -26,40 +28,6 @@ export function buildPrelude(code) {
   return `${lines.join('\n')}\n\n`;
 }
 
-// Insert after the leading package/import block so the prelude stays in the
-// same package and Kotlin's "imports come first" rule still holds.
-function findInsertOffset(code) {
-  const lines = code.split('\n');
-  let offset = 0;
-  let insertAt = 0;
-  let inBlockComment = false;
-  let seenHeader = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    const end = Math.min(code.length, offset + line.length + (i < lines.length - 1 ? 1 : 0));
-
-    if (inBlockComment) {
-      if (trimmed.includes('*/')) inBlockComment = false;
-    } else if (trimmed.startsWith('/*')) {
-      inBlockComment = !trimmed.includes('*/');
-    } else if (trimmed === '' || trimmed.startsWith('//')) {
-      // Leading whitespace and comments are skipped.
-    } else if (!seenHeader && /^package\s+/.test(trimmed)) {
-      insertAt = end;
-      seenHeader = true;
-    } else if (/^import\s+/.test(trimmed)) {
-      insertAt = end;
-      seenHeader = true;
-    } else {
-      break;
-    }
-    offset = end;
-  }
-  return insertAt;
-}
-
 /** Split stdin the way Kotlin's line readers do: no trailing empty line. */
 export function splitLines(input) {
   if (!input) return [];
@@ -70,27 +38,29 @@ export function splitLines(input) {
 }
 
 /**
- * Prepend the stdin prelude when input is supplied, and return a mapping from
- * offsets in the compiled source back to the caller's source for diagnostics.
+ * The source to hand the compiler for one program.
+ *
+ * Two independent additions, both appended after the program so every line number
+ * the user sees stays where they expect it:
+ *
+ *  - the JVM compatibility shims (both targets), and
+ *  - the stdin prelude (wasm, when input is supplied or the program reads it).
+ *
+ * Appending means diagnostics need no offset mapping: the compiler reports user
+ * errors at their real offsets. `mapOffset` is kept for callers that already pass a
+ * function, and is the identity here.
  */
-export function prepareSource(code, input = '') {
+export function prepareSource(code, input = '', target = 'wasm') {
   const usesStdin = /\b(readln|readlnOrNull|readLine)\s*\(/.test(code);
-  if (!input && !usesStdin) {
+  const needsStdin = target === 'wasm' && (Boolean(input) || usesStdin);
+
+  const shims = buildCompatShims(code, target);
+  const stdin = needsStdin ? `\n${buildPrelude(code)}` : '';
+  if (!shims && !stdin) {
     return { source: code, injected: false, mapOffset: (offset) => offset };
   }
 
-  const prelude = buildPrelude(code);
-  const insertAt = findInsertOffset(code);
-  const source = code.slice(0, insertAt) + prelude + code.slice(insertAt);
-  const end = insertAt + prelude.length;
-
-  return {
-    source,
-    injected: true,
-    mapOffset(offset) {
-      if (offset <= insertAt) return offset;
-      if (offset >= end) return offset - prelude.length;
-      return insertAt;
-    }
-  };
+  // Appended, so no offset shifts.
+  const source = `${code}\n${shims}${stdin}`;
+  return { source, injected: true, mapOffset: (offset) => offset };
 }

@@ -543,8 +543,11 @@ export async function createBrowserEngine(options = {}) {
 
     async compile({ code, fileName, compileTimeoutMs }) {
       if (disposed) throw new Error('This compiler has been disposed.');
+      // The shims are part of the program, so `compile()` emits what `run()` would
+      // execute; a host that only compiles still gets the JVM conveniences.
+      const prepared = prepareSource(code, '', target);
       return compileInWorker(record, {
-        source: code,
+        source: prepared.source,
         fileName,
         target,
         compileTimeoutMs
@@ -558,9 +561,9 @@ export async function createBrowserEngine(options = {}) {
     async run({ code, input, fileName, timeoutMs }) {
       if (disposed) throw new Error('This compiler has been disposed.');
       const runTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS;
-      // The Wasm target prepends a stdin prelude, shifting every offset by a
-      // fixed amount; diagnostics subtract it. The JS target prepends nothing.
-      const prepared = target === 'js' ? { source: code, mapOffset: 0 } : prepareSource(code, input);
+      // Both targets get the JVM compatibility shims, appended so no offsets move;
+      // wasm additionally gets the stdin prelude when input is supplied.
+      const prepared = prepareSource(code, input, target);
       const shift = typeof prepared.mapOffset === 'function'
         ? prepared.mapOffset
         : (offset) => offset - Number(prepared.mapOffset || 0);
