@@ -151,6 +151,26 @@ test('stdin: readln() throws at EOF', async () => {
   assert.match(result.errors.join('\n'), /EOF/);
 });
 
+test('System.out, System.err and System.exit work on the wasm target', async () => {
+  // The wasm standard library has no System, so the shims supply one. This is the
+  // behaviour the docs promise, and it regressed silently before when the notice
+  // still claimed these were unresolved.
+  const result = await compiler.run(`fun main() {
+    System.out.println("to out")
+    System.err.println("to err")
+    System.exit(3)
+    println("still runs")
+}
+`);
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.stdout, 'to out\nstill runs\n');
+  assert.equal(result.stderr, 'to err\n');
+  // exit() cannot stop a program whose wasm module has already been run, so it
+  // reports success rather than the requested code.
+  assert.equal(result.exitCode, 0);
+});
+
 test('stdin: diagnostics still point at the caller’s line after the prelude', async () => {
   const result = await compiler.run(
     `import kotlin.math.PI

@@ -324,7 +324,7 @@ for are supplied as Kotlin source appended to every program — on **both** targ
 
 | Area | Supplied |
 | --- | --- |
-| `System` | `currentTimeMillis`, `nanoTime`, `lineSeparator`, `getProperty`, `getenv`, `gc`, `arraycopy` |
+| `System` | `currentTimeMillis`, `nanoTime`, `lineSeparator`, `getProperty`, `getenv`, `gc`, `arraycopy`, `out` / `err` (wasm) |
 | Formatting | `"…".format(…)`, `printf` — `%d %f %e %x %X %o %c %b %s %n %%`, with width, `-`, `0` and `,` flags |
 | `Math` | `PI`, `E`, `abs`, `max`, `min`, `sqrt`, `cbrt`, `pow`, `floor`, `ceil`, `round`, `random`, the trigonometric and logarithmic functions, `hypot`, `signum`, `toRadians`, `toDegrees` |
 | `Integer` | `parseInt`, `parseLong`, `toString`, `toHexString`, `toBinaryString`, `toOctalString`, `compare`, `signum`, `sum`, `MAX_VALUE`, `MIN_VALUE` |
