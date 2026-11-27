@@ -12,19 +12,12 @@ import { KotlinUnsupportedError, KotlinWasmError } from './errors.js';
 import { compileWithLibraries } from './libraries.js';
 import { formatDiagnostics } from './output.js';
 import { resolveBaseUrl, rewriteImage } from './browser.js';
+import { binaryDataUrl, scriptDataUrl, toBase64 } from './data-url.js';
 
 const DEFAULT_FILE_NAME = 'Main.kt';
 const START_TIMEOUT_MS = 180000;
 
 const isGzip = (bytes) => bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
-
-function toBase64(bytes) {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary);
-}
 
 /** Fetches raw bytes. Gzip stays gzipped; only `inflate` unwraps it. */
 async function fetchBytes(url) {
@@ -100,7 +93,7 @@ export async function createInWorkerCompiler(options = {}) {
     new TextDecoder().decode(await fetchBytes(new URL('kotlin-assets.json', baseUrl)))
   );
 
-  // Inflate both archives ourselves so we can hand the loader a Blob URL and the
+  // Inflate both archives ourselves so we can hand the loader a data: URL and the
   // host the stdlib as a string, without the extra worker a wrapper would start.
   // The parts are one gzip stream that the manifest split for the CDN's file
   // size cap, so they must be concatenated before inflating.
@@ -118,7 +111,9 @@ export async function createInWorkerCompiler(options = {}) {
 
   const stdlib = await inflate(await fetchBytes(new URL(manifest.stdlib.file, baseUrl)));
 
-  const wasmUrl = URL.createObjectURL(new Blob([wasm], { type: 'application/wasm' }));
+  // A data: URL, not a Blob: this worker may itself be null-origin (LiveCodes starts
+  // it from a data: URL), where `blob:null/…` cannot be resolved by fetch.
+  const wasmUrl = binaryDataUrl(wasm, 'application/wasm');
   const imageText = new TextDecoder().decode(
     await fetchBytes(new URL('kotlin-compiler-image.js', baseUrl))
   );
@@ -129,9 +124,7 @@ export async function createInWorkerCompiler(options = {}) {
   // of the loop below. Drop it so the loop waits for the fresh one.
   delete globalThis.kotlinCompilerHost;
 
-  globalThis.importScripts(
-    URL.createObjectURL(new Blob([patched], { type: 'text/javascript' }))
-  );
+  globalThis.importScripts(scriptDataUrl(patched));
 
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (!globalThis.kotlinCompilerHost) {

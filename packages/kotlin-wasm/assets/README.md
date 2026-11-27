@@ -95,7 +95,7 @@ of decompressing twice.
 
 The browser package also rewrites the image at runtime to set `config.wasm_path`
 and the stdlib URL to absolute asset URLs, because it may load the worker from a
-same-origin Blob URL while the assets live on a CDN.
+`data:` URL while the assets live on a CDN.
 
 ## SHA-256 (shipped, compressed)
 
@@ -128,7 +128,7 @@ worker.postMessage({ id, operation: 'compile', text: source, argument: '' });
 ```
 
 The returned files (`main.wasm`, `main.mjs`, `main.import-object.mjs`,
-`main.js-builtins.mjs`) are rewired to Blob URLs and imported in a module worker
+`main.js-builtins.mjs`) are rewired to `data:` URLs and imported in a module worker
 by the package's browser engine.
 
 ## Licensing

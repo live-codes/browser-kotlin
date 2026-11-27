@@ -181,9 +181,15 @@ import {
 ### Module workers and pages
 
 Import the module entry. `createCompiler` fetches the two small worker scripts,
-rewrites their asset URLs, and starts the compiler from Blob URLs, so `baseUrl`
+rewrites their asset URLs, and starts the compiler from `data:` URLs, so `baseUrl`
 may be cross-origin (jsDelivr works). The wrapper then fetches the target's
 ~32 MB of gzipped compiler/std lib assets itself and reports progress.
+
+`data:` rather than `blob:` URLs, because a host may create the compile worker from
+a `data:` URL, which leaves it with a null origin. `createObjectURL` there produces
+`blob:null/…`, which `importScripts` cannot load (`NetworkError: The script at
+'blob:null/…' failed to load`). A `data:` URL carries its content and has no origin
+to resolve, so it works from any worker.
 
 For `target: 'js'`, pass the assets root as `baseUrl`; the package appends `js/`
 and loads the source-built JS-target compiler image. The compiler image still

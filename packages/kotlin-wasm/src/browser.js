@@ -3,6 +3,7 @@ import { KotlinUnsupportedError, KotlinWasmError } from './errors.js';
 import { compileWithLibraries } from './libraries.js';
 import { buildResult, compileFailureResult, formatDiagnostics } from './output.js';
 import { JS_STDIN_HOOK, prepareSource, splitLines } from './prelude.js';
+import { scriptDataUrl, binaryDataUrl } from './data-url.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_COMPILE_TIMEOUT_MS = 180000;
@@ -68,7 +69,12 @@ export function resolveBaseUrl(options) {
 
 // A classic Worker must be same-origin; assets are often on a CDN. Fetch the
 // two small scripts, rewrite their relative paths to absolute asset URLs, and
-// start them from Blob URLs instead. The 30 MB compiler/stdlib stay on the CDN.
+// start them from data: URLs instead. The 30 MB compiler/stdlib stay on the CDN.
+//
+// Not Blob URLs: this page may itself be a null-origin sandbox (LiveCodes runs the
+// compiler in a worker created from a data: URL), where createObjectURL yields
+// `blob:null/…` and importScripts on it fails. A data: URL has no origin to resolve
+// against, so it loads either way.
 async function loadWorkerScripts(baseUrl) {
   const fetchText = async (name) => {
     const url = new URL(name, baseUrl).href;
@@ -84,12 +90,8 @@ async function loadWorkerScripts(baseUrl) {
     fetchText('kotlin-compiler-image.js')
   ]);
 
-  const imageUrl = URL.createObjectURL(
-    new Blob([rewriteImage(imageText, baseUrl)], { type: 'text/javascript' })
-  );
-  const wrapperUrl = URL.createObjectURL(
-    new Blob([rewriteWrapper(wrapperText, baseUrl, imageUrl)], { type: 'text/javascript' })
-  );
+  const imageUrl = scriptDataUrl(rewriteImage(imageText, baseUrl));
+  const wrapperUrl = scriptDataUrl(rewriteWrapper(wrapperText, baseUrl, imageUrl));
   return { wrapperUrl, imageUrl };
 }
 
@@ -108,8 +110,8 @@ export function rewriteWrapper(text, baseUrl, imageUrl) {
 
 /**
  * Points the generated loader at our own wasm/stdlib URLs. `urls` lets a caller
- * that already inflated the bytes (a worker loading the image itself) pass Blob
- * URLs instead of asset paths.
+ * that already inflated the bytes (a worker loading the image itself) pass data: URLs
+ * instead of asset paths.
  */
 export function rewriteImage(text, baseUrl, urls = {}) {
   const runCall = 'GraalVM.run(load_cmd_args(),config)';
@@ -142,7 +144,6 @@ async function createRecord(baseUrl, onProgress, target = 'wasm') {
     // image ships `libraries/`, and only its host implements `addLibraries`.
     target,
     worker: null,
-    blobUrls: [wrapperUrl, imageUrl],
     nextId: 1,
     pending: new Map(),
     progress: new Map(),
@@ -304,7 +305,6 @@ function releaseRecord(record, onProgress) {
   } catch {
     // already gone
   }
-  for (const url of record.blobUrls) URL.revokeObjectURL(url);
 }
 
 function decodeAnswerFiles(files, target) {
@@ -398,14 +398,9 @@ async function runCompiledJs(files, onChunk, timeoutMs) {
   const source = new TextDecoder().decode(
     Uint8Array.from(atob(file.content || ''), (c) => c.charCodeAt(0))
   );
-  const urls = [];
-  const blob = (content, type) => {
-    const url = URL.createObjectURL(new Blob([content], { type }));
-    urls.push(url);
-    return url;
-  };
-  const main = blob(source, 'text/javascript');
-  const runner = blob(
+  // data: URLs throughout, for the same null-origin reason as loadWorkerScripts.
+  const main = scriptDataUrl(source);
+  const runner = scriptDataUrl(
     `
     globalThis.write = (message) => postMessage({ output: String(message), stream: 'stdout', newline: false });
     const out = (...values) => postMessage({ output: values.map(String).join(' '), stream: 'stdout', newline: true });
@@ -414,8 +409,7 @@ async function runCompiledJs(files, onChunk, timeoutMs) {
     console.warn = err; console.error = err;
     try { await import(${JSON.stringify(main)}); postMessage({ done: true }); }
     catch (error) { postMessage({ done: true, error: String(error && error.stack || error) }); }
-    `,
-    'text/javascript'
+    `
   );
 
   const started = performance.now();
@@ -427,7 +421,6 @@ async function runCompiledJs(files, onChunk, timeoutMs) {
       settled = true;
       clearTimeout(timer);
       worker.terminate();
-      for (const url of urls) URL.revokeObjectURL(url);
       resolve({ ...outcome, runMs: performance.now() - started });
     };
     const timer = setTimeout(
@@ -452,26 +445,19 @@ async function runCompiledProgram(files, onChunk, timeoutMs, input = '') {
   };
   const bytes = (name) => Uint8Array.from(atob(find(name)), (c) => c.charCodeAt(0));
   const text = (name) => new TextDecoder().decode(bytes(name));
-  const urls = [];
-  const blob = (content, type) => {
-    const url = URL.createObjectURL(new Blob([content], { type }));
-    urls.push(url);
-    return url;
-  };
 
-  const wasm = blob(bytes('main.wasm'), 'application/wasm');
-  const builtins = blob(text('main.js-builtins.mjs'), 'text/javascript');
-  const imports = blob(
-    text('main.import-object.mjs').replaceAll("'./main.js-builtins.mjs'", `'${builtins}'`),
-    'text/javascript'
+  // data: URLs throughout, for the same null-origin reason as loadWorkerScripts.
+  const wasm = binaryDataUrl(bytes('main.wasm'), 'application/wasm');
+  const builtins = scriptDataUrl(text('main.js-builtins.mjs'));
+  const imports = scriptDataUrl(
+    text('main.import-object.mjs').replaceAll("'./main.js-builtins.mjs'", `'${builtins}'`)
   );
-  const main = blob(
+  const main = scriptDataUrl(
     text('main.mjs')
       .replaceAll("'./main.import-object.mjs'", `'${imports}'`)
-      .replaceAll("new URL('./main.wasm',import.meta.url).href", `'${wasm}'`),
-    'text/javascript'
+      .replaceAll("new URL('./main.wasm',import.meta.url).href", `'${wasm}'`)
   );
-  const runner = blob(
+  const runner = scriptDataUrl(
     `
     const inputLines = ${JSON.stringify(splitLines(input))};
     let inputIndex = 0;
@@ -483,8 +469,7 @@ async function runCompiledProgram(files, onChunk, timeoutMs, input = '') {
     console.warn = err; console.error = err;
     try { await import(${JSON.stringify(main)}); postMessage({ done: true }); }
     catch (error) { postMessage({ done: true, error: String(error && error.stack || error) }); }
-    `,
-    'text/javascript'
+    `
   );
 
   const started = performance.now();
@@ -496,7 +481,6 @@ async function runCompiledProgram(files, onChunk, timeoutMs, input = '') {
       settled = true;
       clearTimeout(timer);
       worker.terminate();
-      for (const url of urls) URL.revokeObjectURL(url);
       resolve({ ...outcome, runMs: performance.now() - started });
     };
     const timer = setTimeout(
